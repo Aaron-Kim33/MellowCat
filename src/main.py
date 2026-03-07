@@ -28,7 +28,7 @@ class OpenClawLauncher(ctk.CTk):
         self.config_frame.pack(pady=10, padx=20, fill="x")
 
         ctk.CTkLabel(self.config_frame, text="모델 선택:").grid(row=0, column=0, padx=10, pady=10)
-        self.model_list = ["llama3.1", "qwen2.5-coder", "claude-3-5-sonnet", "[직접 입력]"]
+        self.model_list = ["llama3.2", "llama3.2:1b", "qwen2.5-coder:1.5b", "llama3.1"]
         self.model_combo = ctk.CTkComboBox(self.config_frame, values=self.model_list, width=250)
         self.model_combo.set("llama3.1")
         self.model_combo.grid(row=0, column=1, padx=10, pady=10)
@@ -93,86 +93,116 @@ class OpenClawLauncher(ctk.CTk):
         threading.Thread(target=self.main_logic, daemon=True).start()
 
     def main_logic(self):
-        current_os = platform.system()
+        import json, os, time, subprocess
+
+        self.log(">>> [긴급 복구] Ollama 엔진 및 모델 체크...")
+        self.stop_ollama()
+        ollama_env = os.environ.copy()
+        ollama_env["OLLAMA_HOST"] = "0.0.0.0"
+        subprocess.Popen(["ollama", "serve"], env=ollama_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
-        self.log(">>> [1] 기존 충돌 프로세스 및 포트 청소...")
+        selected_model = self.model_combo.get()
+        clean_model_id = selected_model.replace("ollama/", "")
+        target_model = f"ollama/{clean_model_id}"
+        
+        # 모델 다운로드 확인
+        subprocess.run(["ollama", "pull", clean_model_id])
+        self.log(f"✅ 모델 준비 완료: {target_model}")
+
+        # ---------------------------------------------------------
+        
+        self.log(">>> [1] 성공했던 설정 파일(JSON) 재생성...")
+        config_dir = os.path.expanduser("~/.openclaw_data")
+        os.makedirs(config_dir, exist_ok=True)
+        config_path = os.path.join(config_dir, "config.json")
+        
+        # 가장 표준적이고 성공 확률이 높았던 JSON 구조입니다.
+        config_data = {
+            "gateway": {
+                "mode": "local"
+            },
+            "agents": {
+                "defaults": {
+                    "model": { "primary": target_model }
+                }
+            },
+            "models": {
+                "providers": {
+                    "ollama": {
+                        "baseUrl": "http://host.docker.internal:11434/v1",
+                        "apiKey": "ollama-local",
+                        "api": "openai-completions",
+                        "models": [
+                            {
+                                "id": target_model,
+                                "name": clean_model_id,
+                                "contextWindow": 32000
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+        
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, indent=4)
+
+        # ---------------------------------------------------------
+        
+        self.log(">>> [2] 도커 컨테이너 완전 재부팅...")
         subprocess.run(["docker", "rm", "-f", "openclaw-main"], capture_output=True)
-        # 🔥 팀킬을 유발하는 lsof kill 명령어를 아예 삭제했습니다!
-        self.log(">>> [순정 모드] 안전 실행 및 우회 프록시 포트(18790) 개방...")
-        
-        # 🔥 변경 1: -p 18790:18790 포트를 추가하고, 에러를 내던 옵션을 지웠습니다.
+
+        # 💡 성공 확률이 가장 높았던 환경 변수 조합으로 되돌립니다.
         run_cmd = [
             "docker", "run", "-d",
             "--name", "openclaw-main",
             "-p", "18789:18789",
             "-p", "18790:18790", 
-            "-e", "OPENCLAW_GATEWAY_AUTH_ENABLED=false",
-            "-e", "OPENCLAW_GATEWAY_TOKEN=admin123",  # 🔥 우리가 직접 암호를 admin123으로 고정해버립니다!
-            "-e", "OPENCLAW_MODEL=ollama/llama3.2:latest",
-            "-e", "OLLAMA_HOST=http://host.docker.internal:11434",
+            "-v", f"{config_dir}:/home/node/.openclaw", 
+            "-e", "OPENCLAW_GATEWAY_AUTH_ENABLED=true",
+            "-e", "OPENCLAW_GATEWAY_TOKEN=admin123",
+            "-e", "OPENCLAW_GATEWAY_MODE=local",
+            "-e", f"OPENCLAW_MODEL={target_model}",
+            "-e", "OPENCLAW_CONFIG_PATH=/home/node/.openclaw/config.json",
             "openclaw:local",
-            "openclaw", "gateway", "--port", "18789", "--allow-unconfigured" 
+            "openclaw", "gateway", "run", 
+            "--port", "18789", 
+            "--allow-unconfigured",
+            "--auth", "token",
+            "--token", "admin123"
         ]
 
-        self.log(">>> [2] 엔진 가동 시도...")
-        result = subprocess.run(run_cmd, capture_output=True, text=True)
+        subprocess.run(run_cmd, capture_output=True)
         
-        if result.returncode != 0:
-            self.log(f"❌ 도커 실행 자체 실패: {result.stderr}")
-            self.start_btn.configure(state="normal")
-            return
-        else:
-            self.log(f"✅ 도커 실행 명령 전달! (ID: {result.stdout.strip()[:8]})")
-            
-        time.sleep(2)
-        crash_check = subprocess.run(["docker", "ps", "-q", "-f", "name=openclaw-main"], capture_output=True, text=True)
-        
-        if not crash_check.stdout.strip():
-            logs = subprocess.run(["docker", "logs", "openclaw-main"], capture_output=True, text=True)
-            self.log("🚨 컨테이너가 실행 직후 종료되었습니다!")
-            self.log(f"🔍 사망 원인: {logs.stderr or logs.stdout}")
-            self.start_btn.configure(state="normal")
-            return 
-        else:
-            self.log(">>> [대기] 엔진 정상 작동 중, 예열 대기 (최대 1분)...")
+        # ---------------------------------------------------------
 
+        self.log(">>> [3] 로그 분석 중... (제발 Ollama!)")
         success = False
         for i in range(20): 
-            time.sleep(5)
-            check = subprocess.run(
-                ["docker", "exec", "openclaw-main", "curl", "-s", "http://127.0.0.1:18789/__openclaw__/canvas/"], 
-                capture_output=True, text=True
-            )
+            time.sleep(3)
+            log_check = subprocess.run(["docker", "logs", "openclaw-main"], capture_output=True, text=True)
+            logs = log_check.stdout + log_check.stderr
             
-            if "OpenClaw Canvas" in check.stdout:
-                self.log("✅ 엔진 내부 렌더링 완료! 우회 프록시 통로를 개척합니다.")
+            # 로그에 target_model(예: ollama/llama3.2)이 뜨면 성공!
+            if target_model in logs and "listening" in logs:
+                self.log(f"🎊 복구 성공! '{target_model}' 인식 확인!")
                 
-                # 🔥 변경 2: 무적의 꼼수! 컨테이너 내부에 Node.js TCP 프록시를 실행합니다.
                 proxy_js = "require('net').createServer(c=>{let s=require('net').connect(18789,'127.0.0.1');c.pipe(s).pipe(c);s.on('error',()=>c.destroy());c.on('error',()=>s.destroy());}).listen(18790,'0.0.0.0')"
-                proxy_cmd = ["docker", "exec", "-d", "openclaw-main", "node", "-e", proxy_js]
-                subprocess.run(proxy_cmd)
-                
-                time.sleep(1) # 프록시가 켜질 시간 1초 대기
+                subprocess.run(["docker", "exec", "-d", "openclaw-main", "node", "-e", proxy_js])
                 success = True
                 break
             
-            curr_log = subprocess.run(["docker", "logs", "--tail", "1", "openclaw-main"], capture_output=True, text=True).stdout.strip()
-            if curr_log:
-                self.log(f"📋 엔진 상태: {curr_log[:50]}...")
-            
-            self.log(f"응답 대기 중... ({i*5+5}초 / 100초)")
+            if "anthropic" in logs.lower():
+                self.log("⚠️ 경고: 아직 Claude가 잡혀있습니다. 재시도 중...")
+                
+            self.log(f"엔진 부팅 대기 중... ({i*3+3}초)")
 
         if success:
-            # 🔥 변경 3: 사파리가 접속할 주소를 우회 포트인 18790으로 변경합니다.
-            # 기존: url = "http://127.0.0.1:18790/"
-            # 🔥 변경: 주소 뒤에 마스터키(토큰)를 달아서 자동 로그인 시킵니다!
             url = "http://127.0.0.1:18790/?token=admin123" 
-
-            if current_os == "Darwin":
-                subprocess.run(["open", "-a", "Safari", url])
-                self.log("🚀 사파리 실행 완료! 프록시를 통해 우회/토큰 자동 로그인 접속했습니다.")
+            subprocess.run(["open", "-a", "Safari", url])
+            self.log("🚀 복구 완료! 사파리에서 'New Chat'을 열어주세요.")
         else:
-            self.log("❌ 엔진이 응답을 주지 않습니다. 다시 시도하거나 로그를 확인해주세요.")
+            self.log("❌ 복구 실패: 로그를 다시 확인해야 합니다.")
 
         self.start_btn.configure(state="normal")
 
