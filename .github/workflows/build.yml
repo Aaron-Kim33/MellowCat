@@ -1,0 +1,42 @@
+name: MellowCat Auto Build
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install customtkinter pyinstaller
+
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          pyinstaller --noconfirm --onefile --windowed --uac-admin --icon="assets/icon.ico" --name "MellowCat_Win" src/main.py
+
+      - name: Build (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          pyinstaller --noconfirm --onefile --windowed --icon="assets/icon.icns" --name "MellowCat_Mac" src/main.py
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: MellowCat-${{ matrix.os }}
+          path: |
+            dist/*.exe
+            dist/*.app
