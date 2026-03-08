@@ -7,7 +7,10 @@ import time
 import shutil
 import webbrowser
 import ctypes
+import sys
+import tkinter as tk
 import tkinter.messagebox as messagebox
+from PIL import Image, ImageTk
 
 def is_admin():
     try:
@@ -15,16 +18,26 @@ def is_admin():
     except:
         return False
 
+def resource_path(relative_path):
+    """PyInstaller 빌드 및 로컬 테스트 환경 모두에서 안전하게 assets 경로를 찾아줍니다."""
+    try:
+        # PyInstaller로 패키징되었을 때의 임시 폴더
+        base_path = sys._MEIPASS
+    except Exception:
+        # src/main.py 기준에서 두 단계 위(최상위 폴더)를 베이스로 잡음
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
+
 class OpenClawLauncher(ctk.CTk):
     def __init__(self):
         super().__init__()
-        # OS 확인 (must come before any attribute access)
+        # OS 확인
         self.is_mac = platform.system() == "Darwin"
         self.is_windows = platform.system() == "Windows"
-        # When packaged as an executable we need admin rights on Windows;
-        # running the script directly from the interpreter should not fail.
-        import sys
+        
+        # 권한 체크
         if self.is_windows and getattr(sys, "frozen", False) and not is_admin():
+            self.withdraw()
             messagebox.showerror("권한 필요", "이 애플리케이션을 실행하려면 관리자 권한이 필요합니다.")
             self.destroy()
             return
@@ -32,17 +45,31 @@ class OpenClawLauncher(ctk.CTk):
         self.title("OpenClaw AI Manager Pro")
         self.geometry("700x900")
         
+        # --- 🎨 1. 앱 기본 아이콘 설정 ---
+        try:
+            if self.is_windows:
+                ico_path = resource_path("assets/icon.ico")
+                if os.path.exists(ico_path):
+                    self.after(200, lambda: self.iconbitmap(ico_path))
+            elif self.is_mac:
+                png_path = resource_path("assets/icon.png")
+                if os.path.exists(png_path):
+                    img = tk.PhotoImage(file=png_path)
+                    self.wm_iconphoto(True, img)
+        except Exception as e:
+            print(f"아이콘 로드 실패: {e}")
+
         # --- UI 구성 ---
         self.label = ctk.CTkLabel(self, text="OpenClaw AI Manager", font=("Arial", 28, "bold"))
         self.label.pack(pady=20)
 
-        # 1. 상태 모니터링 섹션
+        # 상태 모니터링 섹션
         self.status_frame = ctk.CTkFrame(self)
         self.status_frame.pack(pady=10, padx=20, fill="x")
         self.create_status_row("Docker (OpenClaw)", "docker_status", self.stop_docker)
         self.create_status_row("Ollama Engine", "ollama_status", self.stop_ollama)
 
-        # 2. 모델 설정 섹션
+        # 모델 설정 섹션
         self.config_frame = ctk.CTkFrame(self)
         self.config_frame.pack(pady=10, padx=20, fill="x")
 
@@ -56,21 +83,47 @@ class OpenClawLauncher(ctk.CTk):
         self.api_entry = ctk.CTkEntry(self.config_frame, placeholder_text="API 키 (선택사항)", width=250, show="*")
         self.api_entry.grid(row=1, column=1, padx=10, pady=5)
 
-        # 3. 로그 창 및 진행바
+        # 로그 창
         self.log_box = ctk.CTkTextbox(self, width=640, height=300, font=("Consolas", 12))
         self.log_box.pack(pady=10, padx=20)
         self.log_box.configure(state="disabled") 
         
-        self.progress = ctk.CTkProgressBar(self, width=640)
-        self.progress.pack(pady=10)
+        # --- 🐈 2. 고양이 프로그레스 바 구성 ---
+        self.progress_frame = ctk.CTkFrame(self, fg_color="transparent", width=640, height=60)
+        self.progress_frame.pack(pady=10)
+        self.progress_frame.pack_propagate(False)
+
+        self.progress = ctk.CTkProgressBar(self.progress_frame, width=640)
+        self.progress.place(relx=0.5, rely=0.8, anchor="center")
         self.progress.set(0)
 
-        # 4. 실행 버튼
-        self.start_btn = ctk.CTkButton(self, text=" 설치 및 통합 실행", command=self.start_thread, height=55, font=("Arial", 20, "bold"))
-        self.start_btn.pack(pady=20)
+        cat_img_path = resource_path("assets/cat_run.png")
+        if os.path.exists(cat_img_path):
+            cat_img = ctk.CTkImage(light_image=Image.open(cat_img_path), size=(40, 40))
+            self.cat_label = ctk.CTkLabel(self.progress_frame, image=cat_img, text="")
+        else:
+            self.cat_label = ctk.CTkLabel(self.progress_frame, text="🐈", font=("Arial", 35))
+        
+        self.cat_label.place(relx=0.0, rely=0.3, anchor="center")
+
+        # 실행 및 종료 버튼
+        self.btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.btn_frame.pack(pady=20)
+
+        self.start_btn = ctk.CTkButton(self.btn_frame, text=" 설치 및 통합 실행", command=self.start_thread, height=55, font=("Arial", 20, "bold"))
+        self.start_btn.pack(side="left", padx=10)
+
+        self.exit_btn = ctk.CTkButton(self.btn_frame, text=" 런처 종료 ", command=self.on_closing, height=55, font=("Arial", 20, "bold"), fg_color="#CC3333", hover_color="#AA2222")
+        self.exit_btn.pack(side="left", padx=10)
 
         self.update_status_loop()
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def set_cat_progress(self, value):
+        """진행 바를 채우면서 고양이를 이동시킵니다."""
+        self.progress.set(value)
+        target_x = 0.05 + (value * 0.90)
+        self.after(0, lambda: self.cat_label.place(relx=target_x, rely=0.3, anchor="center"))
 
     def create_status_row(self, name, attr_name, stop_cmd):
         row = ctk.CTkFrame(self.status_frame, fg_color="transparent")
@@ -79,16 +132,28 @@ class OpenClawLauncher(ctk.CTk):
         status_indicator = ctk.CTkLabel(row, text="확인 중...", text_color="gray")
         status_indicator.pack(side="left", padx=20)
         setattr(self, attr_name, status_indicator)
-        ctk.CTkButton(row, text="종료", width=60, fg_color="#CC3333", command=stop_cmd).pack(side="right")
+        ctk.CTkButton(row, text="강제종료", width=60, fg_color="#CC3333", command=stop_cmd).pack(side="right")
 
     def log(self, text):
-        # Thread-safe logging: delegate to main thread
         def update_log():
             self.log_box.configure(state="normal")
             self.log_box.insert("end", f"[{time.strftime('%H:%M:%S')}] {text}\n")
             self.log_box.configure(state="disabled")
             self.log_box.see("end")
         self.after(0, update_log)
+
+    def run_with_live_logs(self, cmd, startupinfo=None):
+        try:
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo)
+            for line in process.stdout:
+                cleaned_line = line.strip()
+                if cleaned_line:
+                    self.log(f"> {cleaned_line}")
+            process.wait()
+            return process.returncode
+        except Exception as e:
+            self.log(f"⚠️ 프로세스 실행 오류: {e}")
+            return 1
 
     def update_status_loop(self):
         threading.Thread(target=self._check_services, daemon=True).start()
@@ -97,109 +162,84 @@ class OpenClawLauncher(ctk.CTk):
     def _check_services(self):
         try:
             d_check = subprocess.run(["docker", "ps", "--filter", "name=openclaw-main", "-q"], capture_output=True, text=True, encoding="utf-8", errors="replace")
-            # if docker daemon isn't running, stdout may be empty or stderr contain text
-            if d_check.returncode != 0:
-                self.log(f"⚠️ Docker 상태 조회 실패: {d_check.stderr.strip()}")
-            is_docker_on = bool(d_check.stdout.strip())
-            self.docker_status.configure(text="● 실행 중" if is_docker_on else "○ 중지됨",
-                                         text_color="#22CC22" if is_docker_on else "#CC2222")
-        except Exception as e:
-            self.log(f"⚠️ Docker 서비스 확인 중 오류: {e}")
+            is_docker_on = bool(d_check.stdout.strip()) and d_check.returncode == 0
+            self.docker_status.configure(text="● 실행 중" if is_docker_on else "○ 중지됨", text_color="#22CC22" if is_docker_on else "#CC2222")
+        except:
             self.docker_status.configure(text="○ 중지됨", text_color="#CC2222")
+            
         try:
             o_cmd = ["pgrep", "ollama"] if self.is_mac else ["tasklist", "/FI", "IMAGENAME eq ollama.exe"]
             o_check = subprocess.run(o_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
             is_ollama_on = "ollama" in o_check.stdout.lower() or o_check.returncode == 0
-            self.ollama_status.configure(text="● 실행 중" if is_ollama_on else "○ 중지됨",
-                                         text_color="#22CC22" if is_ollama_on else "#CC2222")
-        except Exception as e:
-            self.log(f"⚠️ Ollama 상태 확인 중 오류: {e}")
+            self.ollama_status.configure(text="● 실행 중" if is_ollama_on else "○ 중지됨", text_color="#22CC22" if is_ollama_on else "#CC2222")
+        except:
             self.ollama_status.configure(text="○ 중지됨", text_color="#CC2222")
 
     def start_thread(self):
         self.start_btn.configure(state="disabled")
-        self.progress.set(0)
-        # 모델 다운로드 중인지 표시
+        self.set_cat_progress(0) 
         self.pulling_model = False
-        # 메인 로직 전에 환경 검사부터 별도 스레드로 실행합니다.
         threading.Thread(target=self.check_and_install_dependencies, daemon=True).start()
-
-    def run_winget(self, package_id):
-        """윈도우용 조용한 백그라운드 설치 명령어"""
-        cmd = [
-            "winget", "install", "--id", package_id, 
-            "-e", "--source", "winget", "--silent", 
-            "--accept-package-agreements", "--accept-source-agreements"
-        ]
-        startupinfo = None
-        if self.is_windows:
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        
-        try:
-            subprocess.run(cmd, check=True, startupinfo=startupinfo)
-            return True
-        except subprocess.CalledProcessError:
-            return False
 
     def check_and_install_dependencies(self):
         try:
             self.log(">>> [0] 시스템 필수 환경 점검 시작...")
-            self.progress.set(0.1)
+            self.set_cat_progress(0.1) 
+            
+            startupinfo = None
+            if self.is_windows:
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
             # 1. Ollama 체크 및 설치
             if not shutil.which("ollama"):
-                self.log("⚠️ Ollama가 없습니다. 자동 설치를 시도합니다...")
+                self.log("⚠️ Ollama가 없습니다. 다운로드 및 설치를 시작합니다...")
                 if self.is_windows:
-                    if self.run_winget("Ollama.Ollama"):
+                    cmd = ["winget", "install", "--id", "Ollama.Ollama", "-e", "--source", "winget", "--silent", "--accept-package-agreements", "--accept-source-agreements"]
+                    if self.run_with_live_logs(cmd, startupinfo=startupinfo) == 0:
                         self.log("✅ Ollama 설치 완료!")
                     else:
                         self.log("❌ Ollama 자동 설치 실패. 수동으로 설치해주세요.")
                         self.start_btn.configure(state="normal")
                         return
                 elif self.is_mac:
-                    try:
-                        self.log("⏳ macOS에서 Ollama 설치 중...")
-                        result = subprocess.run(["brew", "install", "ollama"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
-                        if result.returncode == 0:
-                            self.log("✅ Ollama 설치 완료!")
-                        else:
-                            self.log(f"❌ Ollama 설치 실패: {result.stderr}")
-                            self.start_btn.configure(state="normal")
-                            return
-                    except subprocess.TimeoutExpired:
-                        self.log("❌ Ollama 설치 타임아웃.")
+                    self.log("⏳ macOS에서 Ollama 설치 중...")
+                    if self.run_with_live_logs(["brew", "install", "ollama"]) == 0:
+                        self.log("✅ Ollama 설치 완료!")
+                    else:
+                        self.log("❌ Ollama 설치 실패. 수동으로 설치해주세요.")
                         self.start_btn.configure(state="normal")
                         return
-                    except Exception as e:
-                        self.log(f"❌ Ollama 설치 오류: {str(e)}")
-                        self.start_btn.configure(state="normal")
-                        return
-                else:
-                    self.log("❌ 지원되지 않는 OS입니다.")
-                    self.start_btn.configure(state="normal")
-                    return
             else:
                 self.log("✅ Ollama가 이미 설치되어 있습니다.")
-            self.progress.set(0.2)
+            self.set_cat_progress(0.2) 
 
-            # 2. Docker 체크
+            # 2. Docker 체크 및 설치
             if not shutil.which("docker"):
                 self.log("❌ Docker가 설치되어 있지 않습니다!")
                 if self.is_windows:
-                    self.log("⚠️ 윈도우는 Docker 설치 시 재부팅이 필수이므로 자동 설치가 위험합니다.")
-                    self.log("👉 브라우저를 열어 다운로드 페이지로 이동합니다...")
-                    webbrowser.open("https://docs.docker.com/desktop/install/windows-install/")
+                    self.log("⏳ 윈도우용 Docker Desktop 다운로드 및 설치 중... (수 분 소요)")
+                    cmd = ["winget", "install", "--id", "Docker.DockerDesktop", "-e", "--source", "winget", "--silent", "--accept-package-agreements", "--accept-source-agreements"]
+                    
+                    if self.run_with_live_logs(cmd, startupinfo=startupinfo) == 0:
+                        self.log("✅ Docker 설치가 완료되었습니다!")
+                        messagebox.showinfo("재부팅 필요", "Docker 설치가 성공적으로 완료되었습니다.\n가상화 엔진(WSL2) 적용을 위해 PC를 재시작한 후 런처를 다시 실행해주세요.")
+                        self.after(0, self.destroy)
+                        return
+                    else:
+                        self.log("❌ Docker 자동 설치 실패. 브라우저를 열어 수동 설치 유도 중...")
+                        webbrowser.open("https://docs.docker.com/desktop/install/windows-install/")
+                        self.start_btn.configure(state="normal")
+                        return
                 else:
-                    self.log("👉 브라우저를 열어 다운로드 페이지로 이동합니다...")
+                    self.log("👉 맥북은 브라우저를 열어 다운로드 페이지로 이동합니다...")
                     webbrowser.open("https://docs.docker.com/desktop/install/mac-install/")
-                self.start_btn.configure(state="normal")
-                return
+                    self.start_btn.configure(state="normal")
+                    return
             else:
                 self.log("✅ Docker가 이미 설치되어 있습니다.")
-            self.progress.set(0.3)
+            self.set_cat_progress(0.3) 
 
-            # 필수 점검을 통과하면 기존 메인 로직으로 넘어갑니다.
             self.log(">>> 시스템 점검 완료. 메인 로직으로 진입합니다.")
             self.main_logic()
         except Exception as e:
@@ -209,17 +249,15 @@ class OpenClawLauncher(ctk.CTk):
     def main_logic(self):
         try:
             import json
+            startupinfo = None
+            if self.is_windows:
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
             self.log(">>> [긴급 복구] Ollama 엔진 및 모델 체크...")
             self.stop_ollama()
             ollama_env = os.environ.copy()
             ollama_env["OLLAMA_HOST"] = "0.0.0.0"
-            
-            # 윈도우 환경에서 콘솔창 숨기기
-            startupinfo = None
-            if self.is_windows:
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
             subprocess.Popen(["ollama", "serve"], env=ollama_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, startupinfo=startupinfo)
             
@@ -227,19 +265,15 @@ class OpenClawLauncher(ctk.CTk):
             clean_model_id = selected_model.replace("ollama/", "")
             target_model = f"ollama/{clean_model_id}"
             
-            # 모델 다운로드 시작 표시 및 progress bar 방어
             self.pulling_model = True
-            self.log(f"⏳ '{clean_model_id}' 모델을 준비 중입니다. (처음엔 오래 걸릴 수 있습니다)")
-            result = subprocess.run(["ollama", "pull", clean_model_id], startupinfo=startupinfo, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
-            # pull 명령의 stdout/err를 로그에 남겨 문제를 진단할 수 있도록
-            if result.stdout:
-                self.log(result.stdout.strip())
-            if result.stderr:
-                self.log(result.stderr.strip())
-            if result.returncode != 0:
-                raise Exception(f"Ollama pull failed (exit {result.returncode})")
+            self.log(f"⏳ '{clean_model_id}' 모델을 준비 중입니다. 진행 상황을 확인하세요.")
+            
+            pull_status = self.run_with_live_logs(["ollama", "pull", clean_model_id], startupinfo=startupinfo)
+            if pull_status != 0:
+                raise Exception(f"Ollama pull failed (exit {pull_status})")
+                
             self.log(f"✅ 모델 준비 완료: {target_model}")
-            self.progress.set(0.5)
+            self.set_cat_progress(0.5) 
             self.pulling_model = False
 
             # ---------------------------------------------------------
@@ -271,31 +305,26 @@ class OpenClawLauncher(ctk.CTk):
             
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(config_data, f, indent=4)
-            self.progress.set(0.6)
+            self.set_cat_progress(0.6) 
 
             # ---------------------------------------------------------
-            # ---------------------------------------------------------
             self.log(">>> [2] 도커 컨테이너 완전 재부팅...")
-            # make sure docker daemon is available
-            info = subprocess.run(["docker", "info"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+            info = subprocess.run(["docker", "info"], capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo)
             if info.returncode != 0:
                 self.log(f"❌ Docker 데몬이 실행 중이 아닙니다: {info.stderr.strip()}")
                 raise Exception("Docker daemon not running")
             
             subprocess.run(["docker", "rm", "-f", "openclaw-main"], capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo)
             
-            # 👇 여기서부터가 핵심입니다!
-            image_name = "aaronkim33/openclaw:latest" # 변수를 위로 빼서 통일합니다.
+            image_name = "aaronkim33/openclaw:latest"
 
-            # ensure image exists (이제 공식 이미지를 검사합니다)
-            img_check = subprocess.run(["docker", "image", "inspect", image_name], capture_output=True, text=True, encoding="utf-8", errors="replace")
+            img_check = subprocess.run(["docker", "image", "inspect", image_name], capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo)
             if img_check.returncode != 0:
-                self.log(f"⚠️ 이미지 '{image_name}'을 찾을 수 없습니다. 다운로드를 시작합니다 (네트워크에 따라 수 분 소요)...")
-                pull_result = subprocess.run(["docker", "pull", image_name], capture_output=True, text=True, encoding="utf-8", errors="replace")
+                self.log(f"⚠️ 이미지 '{image_name}' 다운로드를 시작합니다...")
+                pull_result = self.run_with_live_logs(["docker", "pull", image_name], startupinfo=startupinfo)
                 
-                if pull_result.returncode != 0:
-                    self.log(f"❌ 이미지 풀 실패: {pull_result.stderr.strip()}")
-                    self.log("이미지를 레지스트리에서 가져올 수 없습니다. aaronkim33 계정에 이미지가 Push되어 있는지 확인하세요.")
+                if pull_result != 0:
+                    self.log("❌ 이미지 풀 실패. 인터넷 연결이나 계정을 확인하세요.")
                     raise Exception("image missing")
                 else:
                     self.log(f"✅ 이미지 '{image_name}' 다운로드 완료!")
@@ -311,7 +340,7 @@ class OpenClawLauncher(ctk.CTk):
                 "-e", "OPENCLAW_GATEWAY_MODE=local",
                 "-e", f"OPENCLAW_MODEL={target_model}",
                 "-e", "OPENCLAW_CONFIG_PATH=/home/node/.openclaw/config.json",
-                image_name,  # <--- 원래 "openclaw:latest" 였던 부분을 변수로 완벽 교체!
+                image_name, 
                 "openclaw", "gateway", "run", 
                 "--port", "18789", 
                 "--allow-unconfigured",
@@ -320,22 +349,20 @@ class OpenClawLauncher(ctk.CTk):
             ]
 
             run_result = subprocess.run(run_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo)
-            # 👆 여기까지 교체하시면 됩니다! (아래 코드는 기존과 동일)
             if run_result.returncode != 0:
                 self.log(f"❌ 도커 컨테이너 실행 실패 (exit {run_result.returncode}): {run_result.stderr.strip()}")
                 raise Exception("docker run failed")
             else:
-                # log first few lines of stdout for transparency
                 if run_result.stdout:
                     outlines = run_result.stdout.strip().splitlines()
                     for line in outlines[:3]:
                         self.log(f"[docker run] {line}")
-                # confirm container exists
-                ps_check = subprocess.run(["docker", "ps", "-q", "--filter", "name=openclaw-main"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+                
+                ps_check = subprocess.run(["docker", "ps", "-q", "--filter", "name=openclaw-main"], capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo)
                 if not ps_check.stdout.strip():
-                    self.log("❌ 컨테이너가 생성되지 않았습니다. 도커 데몬 로그를 확인하세요.")
+                    self.log("❌ 컨테이너가 생성되지 않았습니다.")
                     raise Exception("container not created")
-            self.progress.set(0.7)
+            self.set_cat_progress(0.7) 
             
             # ---------------------------------------------------------
             self.log(">>> [3] 로그 분석 중... (제발 Ollama!)")
@@ -346,14 +373,11 @@ class OpenClawLauncher(ctk.CTk):
                     time.sleep(3)
                     log_check = subprocess.run(["docker", "logs", "openclaw-main"], capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo, timeout=10)
                     logs = log_check.stdout + log_check.stderr
-                    # print most recent log line for debugging
+                    
                     if logs:
                         last_line = logs.strip().splitlines()[-1]
                         self.log(f"[도커 로그] {last_line}")
-                    else:
-                        self.log("[도커 로그] <empty output>")
                     
-                    # Improved success detection: check for model and gateway listening
                     if target_model in logs and ("listening on" in logs.lower() or "gateway started" in logs.lower()):
                         self.log(f"🎊 복구 성공! '{target_model}' 인식 확인!")
                         proxy_js = "require('net').createServer(c=>{let s=require('net').connect(18789,'127.0.0.1');c.pipe(s).pipe(c);s.on('error',()=>c.destroy());c.on('error',()=>s.destroy());}).listen(18790,'0.0.0.0')"
@@ -364,25 +388,20 @@ class OpenClawLauncher(ctk.CTk):
                     if "anthropic" in logs.lower():
                         self.log("⚠️ 경고: 아직 Claude가 잡혀있습니다. 재시도 중...")
                         
-                    self.log(f"엔진 부팅 대기 중... ({i*3+3}초)")
-                    # 대기 시간에 따라 프로그레스 바를 조금씩 채워줍니다.
-                    self.progress.set(0.7 + (i * 0.015))
+                    self.set_cat_progress(0.7 + (i * 0.015)) 
                 except subprocess.TimeoutExpired:
-                    self.log(f"⚠️ 로그 확인 타임아웃 ({i+1}/{max_attempts})")
                     continue
                 except Exception as e:
                     self.log(f"⚠️ 로그 분석 오류: {str(e)}")
                     break
 
             if success:
-                self.progress.set(1.0)
+                self.set_cat_progress(1.0)
                 url = "http://127.0.0.1:18790/?token=admin123" 
-                
-                # [변경점] 사파리 강제 지정이 아닌 OS 기본 브라우저 열기 모듈 사용
                 webbrowser.open(url)
                 self.log("🚀 복구 완료! 브라우저에서 OpenClaw 대시보드를 확인해주세요.")
             else:
-                self.progress.set(0)
+                self.set_cat_progress(0)
                 self.log("❌ 복구 실패: 로그를 다시 확인해야 합니다.")
 
             self.start_btn.configure(state="normal")
@@ -396,11 +415,9 @@ class OpenClawLauncher(ctk.CTk):
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         subprocess.run(["docker", "rm", "-f", "openclaw-main"], startupinfo=startupinfo)
-        self._check_services()
-        self.log("Docker 컨테이너를 중지했습니다.")
+        self.log("Docker 컨테이너(openclaw-main)를 중지했습니다.")
 
     def stop_ollama(self):
-        # 모델을 당기고 있는 중이면 중단하지 않습니다.
         if getattr(self, "pulling_model", False):
             self.log("⚠️ 모델 준비 중에는 Ollama를 중지할 수 없습니다.")
             return
@@ -413,11 +430,16 @@ class OpenClawLauncher(ctk.CTk):
             cmd = ["pkill", "ollama"]
             
         subprocess.run(cmd, startupinfo=startupinfo)
-        self._check_services()
         self.log("Ollama 엔진을 종료했습니다.")
 
     def on_closing(self):
-        self.destroy()
+        answer = messagebox.askyesnocancel("종료 확인", "런처를 종료합니다.\n현재 실행 중인 Docker 컨테이너와 Ollama 엔진도 함께 완전 종료하시겠습니까?")
+        if answer is True: 
+            self.stop_docker()
+            self.stop_ollama()
+            self.destroy()
+        elif answer is False: 
+            self.destroy()
 
 if __name__ == "__main__":
     app = OpenClawLauncher()
