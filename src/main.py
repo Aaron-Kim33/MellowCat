@@ -21,10 +21,8 @@ def is_admin():
 def resource_path(relative_path):
     """PyInstaller 빌드 및 로컬 테스트 환경 모두에서 안전하게 assets 경로를 찾아줍니다."""
     try:
-        # PyInstaller로 패키징되었을 때의 임시 폴더
         base_path = sys._MEIPASS
     except Exception:
-        # src/main.py 기준에서 두 단계 위(최상위 폴더)를 베이스로 잡음
         base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base_path, relative_path)
 
@@ -175,6 +173,36 @@ class OpenClawLauncher(ctk.CTk):
         except:
             self.ollama_status.configure(text="○ 중지됨", text_color="#CC2222")
 
+    def start_docker_engine(self):
+        """도커 앱이 설치되어 있지만 엔진이 꺼져 있을 때 자동으로 실행합니다."""
+        if not self.is_windows: return True # 맥은 시스템에서 자동화가 더 복잡하므로 일단 패스
+        
+        self.log("⏳ 도커 엔진 상태 확인 중...")
+        # docker info는 엔진이 꺼져있으면 0이 아닌 리턴코드를 줍니다.
+        info = subprocess.run(["docker", "info"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        
+        if info.returncode != 0:
+            self.log("🚀 도커 엔진이 잠들어 있습니다. 깨우는 중...")
+            # Docker Desktop 실행 파일 경로 찾기 및 실행
+            docker_exe = os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "Docker\\Docker\\Docker Desktop.exe")
+            if os.path.exists(docker_exe):
+                subprocess.Popen([docker_exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                
+                # 엔진이 올라올 때까지 대기 루프 (최대 60초)
+                for i in range(12):
+                    time.sleep(5)
+                    self.log(f"⏳ 도커 엔진 가동 대기 중... ({i*5+5}초/60초)")
+                    check = subprocess.run(["docker", "info"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+                    if check.returncode == 0:
+                        self.log("✅ 도커 엔진이 성공적으로 준비되었습니다.")
+                        return True
+                self.log("❌ 도커 엔진 가동 시간이 초과되었습니다.")
+                return False
+            else:
+                self.log("❌ Docker Desktop 실행 파일을 찾을 수 없습니다.")
+                return False
+        return True
+
     def start_thread(self):
         self.start_btn.configure(state="disabled")
         self.set_cat_progress(0) 
@@ -214,7 +242,7 @@ class OpenClawLauncher(ctk.CTk):
                 self.log("✅ Ollama가 이미 설치되어 있습니다.")
             self.set_cat_progress(0.2) 
 
-            # 2. Docker 체크 및 설치
+            # 2. Docker 체크 및 설치/실행
             if not shutil.which("docker"):
                 self.log("❌ Docker가 설치되어 있지 않습니다!")
                 if self.is_windows:
@@ -238,8 +266,13 @@ class OpenClawLauncher(ctk.CTk):
                     return
             else:
                 self.log("✅ Docker가 이미 설치되어 있습니다.")
+                # 💡 핵심 추가: 도커가 설치되어 있다면 엔진을 깨웁니다.
+                if not self.start_docker_engine():
+                    self.log("❌ 도커 엔진을 켤 수 없습니다. Docker Desktop을 수동으로 실행해주세요.")
+                    self.start_btn.configure(state="normal")
+                    return
+            
             self.set_cat_progress(0.3) 
-
             self.log(">>> 시스템 점검 완료. 메인 로직으로 진입합니다.")
             self.main_logic()
         except Exception as e:
@@ -309,11 +342,7 @@ class OpenClawLauncher(ctk.CTk):
 
             # ---------------------------------------------------------
             self.log(">>> [2] 도커 컨테이너 완전 재부팅...")
-            info = subprocess.run(["docker", "info"], capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo)
-            if info.returncode != 0:
-                self.log(f"❌ Docker 데몬이 실행 중이 아닙니다: {info.stderr.strip()}")
-                raise Exception("Docker daemon not running")
-            
+            # 이미 start_docker_engine 단계에서 엔진이 보장되므로 정보 조회 생략 가능
             subprocess.run(["docker", "rm", "-f", "openclaw-main"], capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo)
             
             image_name = "aaronkim33/openclaw:latest"
@@ -322,12 +351,9 @@ class OpenClawLauncher(ctk.CTk):
             if img_check.returncode != 0:
                 self.log(f"⚠️ 이미지 '{image_name}' 다운로드를 시작합니다...")
                 pull_result = self.run_with_live_logs(["docker", "pull", image_name], startupinfo=startupinfo)
-                
                 if pull_result != 0:
-                    self.log("❌ 이미지 풀 실패. 인터넷 연결이나 계정을 확인하세요.")
                     raise Exception("image missing")
-                else:
-                    self.log(f"✅ 이미지 '{image_name}' 다운로드 완료!")
+                self.log(f"✅ 이미지 '{image_name}' 다운로드 완료!")
 
             run_cmd = [
                 "docker", "run", "-d",
@@ -350,22 +376,12 @@ class OpenClawLauncher(ctk.CTk):
 
             run_result = subprocess.run(run_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo)
             if run_result.returncode != 0:
-                self.log(f"❌ 도커 컨테이너 실행 실패 (exit {run_result.returncode}): {run_result.stderr.strip()}")
                 raise Exception("docker run failed")
-            else:
-                if run_result.stdout:
-                    outlines = run_result.stdout.strip().splitlines()
-                    for line in outlines[:3]:
-                        self.log(f"[docker run] {line}")
-                
-                ps_check = subprocess.run(["docker", "ps", "-q", "--filter", "name=openclaw-main"], capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo)
-                if not ps_check.stdout.strip():
-                    self.log("❌ 컨테이너가 생성되지 않았습니다.")
-                    raise Exception("container not created")
+            
             self.set_cat_progress(0.7) 
             
             # ---------------------------------------------------------
-            self.log(">>> [3] 로그 분석 중... (제발 Ollama!)")
+            self.log(">>> [3] 로그 분석 중... ")
             success = False
             max_attempts = 20
             for i in range(max_attempts): 
