@@ -40,8 +40,9 @@ class OpenClawLauncher(ctk.CTk):
             self.destroy()
             return
         
+        # 🟢 맥북 에어 화면에 쏙 들어가도록 세로 길이를 850으로 압축했습니다.
         self.title("MellowCat")
-        self.geometry("750x950") # 🟢 스킬 체크박스가 빠져서 창 길이를 다시 줄였습니다.
+        self.geometry("780x850") 
         
         try:
             if self.is_windows:
@@ -60,8 +61,9 @@ class OpenClawLauncher(ctk.CTk):
         os_name = platform.system()
         cpu_arch = platform.machine()
 
+        # 여백(pady)들을 최소화하여 공간을 확보합니다.
         self.label = ctk.CTkLabel(self, text="MellowCat", font=("Arial", 32, "bold"))
-        self.label.pack(pady=10)
+        self.label.pack(pady=5)
 
         self.status_frame = ctk.CTkFrame(self)
         self.status_frame.pack(pady=5, padx=20, fill="x")
@@ -69,7 +71,7 @@ class OpenClawLauncher(ctk.CTk):
         self.create_status_row("Ollama Engine", "ollama_status", self.stop_ollama)
 
         # ---------------------------------------------------------
-        # 1. 시스템 및 모델 설정
+        # 1. 시스템 및 모델 설정 섹션
         # ---------------------------------------------------------
         self.config_frame = ctk.CTkFrame(self)
         self.config_frame.pack(pady=5, padx=20, fill="x")
@@ -80,7 +82,7 @@ class OpenClawLauncher(ctk.CTk):
         self.ram_label = ctk.CTkLabel(self.config_frame, text=f"🔥 내 PC RAM: {self.ram_gb}GB", font=("Arial", 14, "bold"), text_color="#3399FF")
         self.ram_label.grid(row=1, column=0, columnspan=2, padx=10, pady=(0, 5), sticky="w")
 
-        ctk.CTkLabel(self.config_frame, text="모델 선택:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(self.config_frame, text="모델 선택:").grid(row=2, column=0, padx=10, pady=2, sticky="w")
         
         self.model_list = []
         base_models = [
@@ -100,10 +102,10 @@ class OpenClawLauncher(ctk.CTk):
         self.model_list.append("✍️ 기타 (직접 입력)")
 
         self.model_combo = ctk.CTkComboBox(self.config_frame, values=self.model_list, width=380, command=self.on_model_select)
-        self.model_combo.grid(row=2, column=1, padx=10, pady=5, sticky="w")
+        self.model_combo.grid(row=2, column=1, padx=10, pady=2, sticky="w")
 
         self.ram_warning_label = ctk.CTkLabel(self.config_frame, text="", font=("Arial", 12, "bold"))
-        self.ram_warning_label.grid(row=3, column=1, padx=10, pady=(0, 5), sticky="w")
+        self.ram_warning_label.grid(row=3, column=1, padx=10, pady=(0, 2), sticky="w")
 
         self.custom_label = ctk.CTkLabel(self.config_frame, text="모델명 입력:", text_color="#22CC22")
         self.custom_model_entry = ctk.CTkEntry(self.config_frame, placeholder_text="예: ollama/mistral", width=320)
@@ -116,27 +118,44 @@ class OpenClawLauncher(ctk.CTk):
         
         ctk.CTkLabel(self.channel_frame, text="[ 메신저 채널 연동 (선택) ]", font=("Arial", 13, "bold")).grid(row=0, column=0, columnspan=3, padx=10, pady=5, sticky="w")
 
-        # Telegram 입력칸 & 도움말 버튼
-        ctk.CTkLabel(self.channel_frame, text="Telegram:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(self.channel_frame, text="Telegram:").grid(row=1, column=0, padx=10, pady=2, sticky="w")
         self.tg_entry = ctk.CTkEntry(self.channel_frame, placeholder_text="봇 토큰 입력 (예: 12345:ABCDE...)", width=410, show="*")
-        self.tg_entry.grid(row=1, column=1, padx=(10, 5), pady=5, sticky="w")
-        ctk.CTkButton(self.channel_frame, text="?", width=30, command=self.show_telegram_help, fg_color="#555555", hover_color="#777777").grid(row=1, column=2, padx=(0, 10), pady=5, sticky="w")
+        self.tg_entry.grid(row=1, column=1, padx=(10, 5), pady=2, sticky="w")
+        ctk.CTkButton(self.channel_frame, text="?", width=30, command=self.show_telegram_help, fg_color="#555555", hover_color="#777777").grid(row=1, column=2, padx=(0, 10), pady=2, sticky="w")
 
-        # Discord 입력칸 & 도움말 버튼
-        ctk.CTkLabel(self.channel_frame, text="Discord:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(self.channel_frame, text="Discord:").grid(row=2, column=0, padx=10, pady=2, sticky="w")
         self.dc_entry = ctk.CTkEntry(self.channel_frame, placeholder_text="봇 토큰 입력 (예: MTEyMz...)", width=410, show="*")
-        self.dc_entry.grid(row=2, column=1, padx=(10, 5), pady=5, sticky="w")
-        ctk.CTkButton(self.channel_frame, text="?", width=30, command=self.show_discord_help, fg_color="#555555", hover_color="#777777").grid(row=2, column=2, padx=(0, 10), pady=5, sticky="w")
+        self.dc_entry.grid(row=2, column=1, padx=(10, 5), pady=2, sticky="w")
+        ctk.CTkButton(self.channel_frame, text="?", width=30, command=self.show_discord_help, fg_color="#555555", hover_color="#777777").grid(row=2, column=2, padx=(0, 10), pady=2, sticky="w")
         
-        # 🟢 [수정됨] WhatsApp QR 연동 전용 버튼 추가
         self.wa_btn = ctk.CTkButton(self.channel_frame, text="📱 WhatsApp 연동하기 (QR코드 띄우기)", fg_color="#25D366", hover_color="#128C7E", text_color="white", font=("Arial", 13, "bold"), command=self.open_whatsapp_qr)
-        self.wa_btn.grid(row=3, column=0, columnspan=3, padx=10, pady=(5, 10), sticky="w")
+        self.wa_btn.grid(row=3, column=0, columnspan=3, padx=10, pady=(5, 5), sticky="w")
+
+        # ---------------------------------------------------------
+        # 3. 보안 및 기기 승인 (Pairing) 섹션
+        # ---------------------------------------------------------
+        self.pairing_frame = ctk.CTkFrame(self)
+        self.pairing_frame.pack(pady=5, padx=20, fill="x")
         
-        # 🟢 스킬 프레임은 요청하신 대로 깔끔하게 삭제했습니다!
+        ctk.CTkLabel(self.pairing_frame, text="[ 🔐 봇 사용 권한 승인 (Pairing) ]", font=("Arial", 13, "bold"), text_color="#FFB347").grid(row=0, column=0, columnspan=4, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(self.pairing_frame, text="메신저에서 보낸 코드 입력:").grid(row=1, column=0, padx=10, pady=2, sticky="w")
+        
+        self.pairing_ch_combo = ctk.CTkComboBox(self.pairing_frame, values=["telegram", "whatsapp", "discord"], width=100)
+        self.pairing_ch_combo.grid(row=1, column=1, padx=(5, 5), pady=2, sticky="w")
+        
+        self.pairing_entry = ctk.CTkEntry(self.pairing_frame, placeholder_text="예: J46PG7YA", width=110)
+        self.pairing_entry.grid(row=1, column=2, padx=(5, 5), pady=2, sticky="w")
+        
+        self.pairing_btn = ctk.CTkButton(self.pairing_frame, text="✅ 승인", width=60, command=self.approve_pairing)
+        self.pairing_btn.grid(row=1, column=3, padx=(5, 10), pady=2, sticky="w")
+
+        # ---------------------------------------------------------
+
         self.auto_select_model()
 
-        self.log_box = ctk.CTkTextbox(self, width=680, height=200, font=("Consolas", 12))
-        self.log_box.pack(pady=10, padx=20)
+        # 🟢 로그 박스 높이를 180 -> 100으로 줄여서 공간을 대폭 확보했습니다.
+        self.log_box = ctk.CTkTextbox(self, width=680, height=100, font=("Consolas", 12))
+        self.log_box.pack(pady=5, padx=20)
         self.log_box.configure(state="disabled") 
         
         self.progress_frame = ctk.CTkFrame(self, fg_color="transparent", width=680, height=50)
@@ -157,7 +176,7 @@ class OpenClawLauncher(ctk.CTk):
         self.cat_label.place(relx=0.0, rely=0.3, anchor="center")
 
         self.btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.btn_frame.pack(pady=(5, 15))
+        self.btn_frame.pack(pady=(5, 10))
 
         self.start_btn = ctk.CTkButton(self.btn_frame, text=" 원클릭 자동 설치 및 실행 ", command=self.start_thread, height=50, font=("Arial", 18, "bold"))
         self.start_btn.pack(side="left", padx=10)
@@ -177,14 +196,11 @@ class OpenClawLauncher(ctk.CTk):
             self.ram_warning_label.configure(text="")
 
         if "직접 입력" in choice:
-            self.custom_label.grid(row=4, column=0, padx=10, pady=5, sticky="w")
-            self.custom_model_entry.grid(row=4, column=1, padx=10, pady=5, sticky="w")
+            self.custom_label.grid(row=4, column=0, padx=10, pady=2, sticky="w")
+            self.custom_model_entry.grid(row=4, column=1, padx=10, pady=2, sticky="w")
         else:
             self.custom_label.grid_forget()
             self.custom_model_entry.grid_forget()
-
-    def paste_from_clipboard(self):
-        pass
 
     def show_telegram_help(self):
         help_text = [
@@ -214,25 +230,47 @@ class OpenClawLauncher(ctk.CTk):
             "--------------------------------------------------"
         ]
         for line in help_text:
-            self.log(line)    
+            self.log(line)
 
     def open_whatsapp_qr(self):
-        # 도커가 켜져 있는지 먼저 확인합니다.
         check = subprocess.run(["docker", "ps", "-q", "-f", "name=openclaw-main"], capture_output=True, text=True)
         if not check.stdout.strip():
             self.log("⚠️ 앗! 먼저 하단의 '원클릭 자동 설치 및 실행'을 눌러서 시스템을 켜주세요!")
             return
         
         self.log("📱 WhatsApp QR 코드 창을 엽니다. 스마트폰으로 스캔해주세요!")
-        
-        # OS별로 새 터미널 창을 열어 QR 코드를 보여줍니다.
         if self.is_mac:
-            # 🟢 [수정됨] login whatsapp -> login --channel whatsapp
             cmd = 'tell application "Terminal" to do script "docker exec -it openclaw-main openclaw channels login --channel whatsapp"'
             subprocess.run(['osascript', '-e', cmd])
         elif self.is_windows:
             subprocess.Popen(['start', 'cmd', '/k', 'docker exec -it openclaw-main openclaw channels login --channel whatsapp'], shell=True)
+
+    def approve_pairing(self):
+        channel = self.pairing_ch_combo.get()
+        code = self.pairing_entry.get().strip()
+        
+        if not code:
+            self.log("⚠️ 봇이 메신저로 보내준 8자리 페어링 코드를 입력해주세요.")
+            return
             
+        check = subprocess.run(["docker", "ps", "-q", "-f", "name=openclaw-main"], capture_output=True, text=True)
+        if not check.stdout.strip():
+            self.log("⚠️ 시스템이 아직 실행되지 않았습니다.")
+            return
+
+        self.log(f"🔐 [{channel}] 페어링 코드({code}) 승인을 시도합니다...")
+        cmd = ["docker", "exec", "openclaw-main", "openclaw", "pairing", "approve", channel, code]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        
+        output = res.stdout.strip() + res.stderr.strip()
+        self.log(f"[승인 결과] {output}")
+        
+        if res.returncode == 0 and "error" not in output.lower():
+            self.log("🎉 기기 승인이 완료되었습니다! 이제 메신저에서 봇과 대화할 수 있습니다.")
+            self.pairing_entry.delete(0, 'end')
+        else:
+            self.log("❌ 승인 실패. 채널과 코드가 정확한지 확인해주세요.")
+
     def auto_select_model(self):
         try:
             if self.ram_gb <= 8:
@@ -476,23 +514,21 @@ class OpenClawLauncher(ctk.CTk):
 
             self.set_cat_progress(0.5)
 
-            # 🟢 [핵심 1] JSON에는 토큰(비밀번호)을 절대 적지 않습니다! (Doctor 에러 방지)
-            self.log(">>> [3] 사용자 설정 기반 '원클릭 설정 파일(JSON)' 생성 중...")
+            # 🟢 [핵심] JSON 파일 생성 (보안 Pairing 모드 유지, 토큰 미포함)
+            self.log(">>> [3] 보안 설정(Pairing) 기반 설정 파일 생성 중...")
             
             channels_config = {
-                "whatsapp": { "enabled": False, "dmPolicy": "pairing", "groupPolicy": "allowlist", "debounceMs": 0, "mediaMaxMb": 50 }
+                "whatsapp": { "enabled": True, "dmPolicy": "pairing", "groupPolicy": "allowlist", "debounceMs": 0, "mediaMaxMb": 50 }
             }
             
-            # 텔레그램: 토큰은 빼고 활성화(enabled: True)만 시킵니다.
             if tg_token:
                 channels_config["telegram"] = { "enabled": True, "dmPolicy": "pairing", "groupPolicy": "allowlist", "streaming": "partial" }
                 self.log("✅ Telegram 채널 활성화 (토큰은 부팅 후 안전하게 주입됩니다)")
             else:
                 channels_config["telegram"] = { "enabled": False, "dmPolicy": "pairing", "groupPolicy": "allowlist", "streaming": "partial" }
                 
-            # 디스코드: 토큰 빼고 활성화만!
             if dc_token:
-                channels_config["discord"] = { "enabled": True, "groupPolicy": "allowlist", "streaming": "off" }
+                channels_config["discord"] = { "enabled": True, "dmPolicy": "pairing", "groupPolicy": "allowlist", "streaming": "off" }
                 self.log("✅ Discord 채널 활성화 (토큰은 부팅 후 안전하게 주입됩니다)")
             else:
                 channels_config["discord"] = { "enabled": False, "groupPolicy": "allowlist", "streaming": "off" }
@@ -521,7 +557,6 @@ class OpenClawLauncher(ctk.CTk):
             # 도커 실행
             self.log(">>> [4] 도커 컨테이너 실행 중...")
             image_name = "ghcr.io/openclaw/openclaw:latest"
-            # (이하 기존 도커 run 코드 유지... CLI로 채널 등록하는 부분은 삭제하세요!)
             subprocess.run(["docker", "pull", image_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, startupinfo=startupinfo)
 
             run_cmd = [
@@ -568,21 +603,20 @@ class OpenClawLauncher(ctk.CTk):
                     self.log(f"⚠️ 로그 분석 오류: {str(e)}")
                     break
 
-            # 🟢 [핵심 2] 게이트웨이가 완벽하게 켜진(success) 이후에 토큰을 주입합니다!
-            # 🟢 [핵심 2] 게이트웨이가 완벽하게 켜진 이후에 토큰을 주입합니다!
+            # 🟢 [핵심] 게이트웨이가 완전히 켜진 후 토큰 주입
             if success:
                 self.set_cat_progress(0.9)
                 
                 if tg_token or dc_token:
                     self.log(">>> [6] 자동 채널 연동 (보안 토큰 주입) 진행 중...")
-                    
+                    time.sleep(2) # 게이트웨이 안정화 대기
                     if tg_token:
-                        self.log("📡 Telegram 토큰을 시스템 내부에 안전하게 등록합니다...")
+                        self.log("📡 Telegram 토큰을 내부 시스템에 안전하게 등록합니다...")
                         tg_res = subprocess.run(["docker", "exec", "openclaw-main", "openclaw", "channels", "add", "--channel", "telegram", "--token", tg_token], capture_output=True, text=True)
                         self.log(f"[CLI 결과] {tg_res.stdout.strip() or tg_res.stderr.strip()}")
                         
                     if dc_token:
-                        self.log("📡 Discord 토큰을 시스템 내부에 안전하게 등록합니다...")
+                        self.log("📡 Discord 토큰을 내부 시스템에 안전하게 등록합니다...")
                         dc_res = subprocess.run(["docker", "exec", "openclaw-main", "openclaw", "channels", "add", "--channel", "discord", "--token", dc_token], capture_output=True, text=True)
                         self.log(f"[CLI 결과] {dc_res.stdout.strip() or dc_res.stderr.strip()}")
 
