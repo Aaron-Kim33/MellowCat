@@ -10,6 +10,9 @@ import ctypes
 import sys
 import tkinter as tk
 import tkinter.messagebox as messagebox
+import psutil
+import math
+import json
 from PIL import Image, ImageTk
 
 def is_admin():
@@ -29,11 +32,9 @@ def resource_path(relative_path):
 class OpenClawLauncher(ctk.CTk):
     def __init__(self):
         super().__init__()
-        # OS 확인
         self.is_mac = platform.system() == "Darwin"
         self.is_windows = platform.system() == "Windows"
         
-        # 권한 체크
         if self.is_windows and getattr(sys, "frozen", False) and not is_admin():
             self.withdraw()
             messagebox.showerror("권한 필요", "이 애플리케이션을 실행하려면 관리자 권한이 필요합니다.")
@@ -41,7 +42,7 @@ class OpenClawLauncher(ctk.CTk):
             return
         
         self.title("OpenClaw AI Manager Pro")
-        self.geometry("700x900")
+        self.geometry("750x950")
         
         # --- 🎨 1. 앱 기본 아이콘 설정 ---
         try:
@@ -67,31 +68,59 @@ class OpenClawLauncher(ctk.CTk):
         self.create_status_row("Docker (OpenClaw)", "docker_status", self.stop_docker)
         self.create_status_row("Ollama Engine", "ollama_status", self.stop_ollama)
 
-        # 모델 설정 섹션
+        # --- 💻 하드웨어 분석 및 모델 설정 섹션 ---
         self.config_frame = ctk.CTkFrame(self)
         self.config_frame.pack(pady=10, padx=20, fill="x")
 
-        ctk.CTkLabel(self.config_frame, text="모델 선택:").grid(row=0, column=0, padx=10, pady=10)
-        self.model_list = ["llama3.2", "llama3.2:1b", "qwen2.5-coder:1.5b", "llama3.1"]
-        self.model_combo = ctk.CTkComboBox(self.config_frame, values=self.model_list, width=250)
-        self.model_combo.set("llama3.1")
-        self.model_combo.grid(row=0, column=1, padx=10, pady=10)
+        # 1. 하드웨어 분석 결과 출력
+        hardware_info, recommended_model = self.analyze_hardware()
+        self.hw_label = ctk.CTkLabel(self.config_frame, text=f"💻 내 PC: {hardware_info}", font=("Arial", 12))
+        self.hw_label.grid(row=0, column=0, columnspan=2, padx=10, pady=(10, 0), sticky="w")
+        
+        self.rec_label = ctk.CTkLabel(self.config_frame, text=f"💡 권장 설정: {recommended_model}", font=("Arial", 12, "bold"), text_color="#22CC22")
+        self.rec_label.grid(row=1, column=0, columnspan=2, padx=10, pady=(0, 10), sticky="w")
 
-        ctk.CTkLabel(self.config_frame, text="API 키:").grid(row=1, column=0, padx=10, pady=5)
-        self.api_entry = ctk.CTkEntry(self.config_frame, placeholder_text="API 키 (선택사항)", width=250, show="*")
-        self.api_entry.grid(row=1, column=1, padx=10, pady=5)
+        # 2. 모델 선택 (로컬 모델 전용 + 직접 입력)
+        ctk.CTkLabel(self.config_frame, text="모델 선택:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        self.model_list = [
+            "⭐ Llama 3.2:3b (로컬 - 8GB RAM 최적/추천)",
+            "💻 Qwen 2.5 Coder:7b (로컬 - 코딩 특화)",
+            "💻 Llama 3.1:8b (로컬 - 마지노선)",
+            "✍️ 기타 (직접 입력)"
+        ]
+        self.model_combo = ctk.CTkComboBox(self.config_frame, values=self.model_list, width=320, command=self.on_model_select)
+        self.model_combo.grid(row=2, column=1, padx=10, pady=5)
+
+        # 3. API 키 입력 및 붙여넣기 버튼 (유료 API 직접 입력 대비용 유지)
+        ctk.CTkLabel(self.config_frame, text="API 키:").grid(row=3, column=0, padx=10, pady=5, sticky="w")
+        
+        self.api_inner_frame = ctk.CTkFrame(self.config_frame, fg_color="transparent")
+        self.api_inner_frame.grid(row=3, column=1, padx=10, pady=5, sticky="w")
+        
+        self.api_entry = ctk.CTkEntry(self.api_inner_frame, placeholder_text="API 모델 선택 시 필수 입력 (로컬은 비워둠)", width=220, show="*")
+        self.api_entry.pack(side="left")
+        
+        self.paste_btn = ctk.CTkButton(self.api_inner_frame, text="📋 붙여넣기", width=80, command=self.paste_from_clipboard, fg_color="#444444", hover_color="#555555")
+        self.paste_btn.pack(side="left", padx=(10, 0))
+
+        # 4. 모델 직접 입력 칸 (초기에는 숨김)
+        self.custom_label = ctk.CTkLabel(self.config_frame, text="모델명 입력:", text_color="#22CC22")
+        self.custom_model_entry = ctk.CTkEntry(self.config_frame, placeholder_text="예: ollama/mistral 또는 openai/gpt-4o", width=320)
+
+        # 🟢 하드웨어 기반 자동 선택 실행
+        self.auto_select_model()
 
         # 로그 창
-        self.log_box = ctk.CTkTextbox(self, width=640, height=300, font=("Consolas", 12))
+        self.log_box = ctk.CTkTextbox(self, width=680, height=250, font=("Consolas", 12))
         self.log_box.pack(pady=10, padx=20)
         self.log_box.configure(state="disabled") 
         
         # --- 🐈 2. 고양이 프로그레스 바 구성 ---
-        self.progress_frame = ctk.CTkFrame(self, fg_color="transparent", width=640, height=60)
+        self.progress_frame = ctk.CTkFrame(self, fg_color="transparent", width=680, height=60)
         self.progress_frame.pack(pady=10)
         self.progress_frame.pack_propagate(False)
 
-        self.progress = ctk.CTkProgressBar(self.progress_frame, width=640)
+        self.progress = ctk.CTkProgressBar(self.progress_frame, width=680)
         self.progress.place(relx=0.5, rely=0.8, anchor="center")
         self.progress.set(0)
 
@@ -117,8 +146,56 @@ class OpenClawLauncher(ctk.CTk):
         self.update_status_loop()
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
+    # --- UI 이벤트 및 하드웨어 분석 메서드 ---
+    def on_model_select(self, choice):
+        if "직접 입력" in choice:
+            self.custom_label.grid(row=4, column=0, padx=10, pady=5, sticky="w")
+            self.custom_model_entry.grid(row=4, column=1, padx=10, pady=5)
+        else:
+            self.custom_label.grid_forget()
+            self.custom_model_entry.grid_forget()
+
+    def paste_from_clipboard(self):
+        try:
+            clipboard_text = self.clipboard_get()
+            self.api_entry.delete(0, "end")
+            self.api_entry.insert(0, clipboard_text)
+            self.log("✅ 클립보드에서 API 키를 성공적으로 붙여넣었습니다.")
+        except tk.TclError:
+            self.log("⚠️ 클립보드에 복사된 텍스트가 없습니다.")
+
+    def analyze_hardware(self):
+        try:
+            ram_bytes = psutil.virtual_memory().total
+            ram_gb = math.ceil(ram_bytes / (1024 ** 3))
+            os_name = platform.system()
+            cpu_arch = platform.machine()
+            hw_string = f"{os_name} ({cpu_arch}) / RAM {ram_gb}GB"
+            
+            if ram_gb <= 8:
+                recommendation = "로컬 3B 모델 권장 (메모리 최적화)"
+            elif ram_gb <= 16:
+                recommendation = "로컬 8B 이하 모델 권장"
+            else:
+                recommendation = "로컬 14B 이상 고성능 모델 구동 가능"
+                
+            return hw_string, recommendation
+        except Exception as e:
+            return "사양 분석 실패", "알 수 없음"
+
+    def auto_select_model(self):
+        try:
+            ram_gb = math.ceil(psutil.virtual_memory().total / (1024 ** 3))
+            if ram_gb <= 16:
+                self.model_combo.set(self.model_list[0]) 
+            else:
+                self.model_combo.set(self.model_list[1]) 
+        except:
+            self.model_combo.set(self.model_list[0])
+        self.on_model_select(self.model_combo.get())
+
+    # --- 유틸리티 메서드 ---
     def set_cat_progress(self, value):
-        """진행 바를 채우면서 고양이를 이동시킵니다."""
         self.progress.set(value)
         target_x = 0.05 + (value * 0.90)
         self.after(0, lambda: self.cat_label.place(relx=target_x, rely=0.3, anchor="center"))
@@ -174,21 +251,16 @@ class OpenClawLauncher(ctk.CTk):
             self.ollama_status.configure(text="○ 중지됨", text_color="#CC2222")
 
     def start_docker_engine(self):
-        """도커 앱이 설치되어 있지만 엔진이 꺼져 있을 때 자동으로 실행합니다."""
-        if not self.is_windows: return True # 맥은 시스템에서 자동화가 더 복잡하므로 일단 패스
+        if not self.is_windows: return True 
         
         self.log("⏳ 도커 엔진 상태 확인 중...")
-        # docker info는 엔진이 꺼져있으면 0이 아닌 리턴코드를 줍니다.
         info = subprocess.run(["docker", "info"], capture_output=True, text=True, encoding="utf-8", errors="replace")
         
         if info.returncode != 0:
             self.log("🚀 도커 엔진이 잠들어 있습니다. 깨우는 중...")
-            # Docker Desktop 실행 파일 경로 찾기 및 실행
             docker_exe = os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "Docker\\Docker\\Docker Desktop.exe")
             if os.path.exists(docker_exe):
                 subprocess.Popen([docker_exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                
-                # 엔진이 올라올 때까지 대기 루프 (최대 60초)
                 for i in range(12):
                     time.sleep(5)
                     self.log(f"⏳ 도커 엔진 가동 대기 중... ({i*5+5}초/60초)")
@@ -203,6 +275,7 @@ class OpenClawLauncher(ctk.CTk):
                 return False
         return True
 
+    # --- 메인 실행 로직 ---
     def start_thread(self):
         self.start_btn.configure(state="disabled")
         self.set_cat_progress(0) 
@@ -219,7 +292,6 @@ class OpenClawLauncher(ctk.CTk):
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
-            # 1. Ollama 체크 및 설치
             if not shutil.which("ollama"):
                 self.log("⚠️ Ollama가 없습니다. 다운로드 및 설치를 시작합니다...")
                 if self.is_windows:
@@ -239,41 +311,38 @@ class OpenClawLauncher(ctk.CTk):
                         self.start_btn.configure(state="normal")
                         return
             else:
-                self.log("✅ Ollama가 이미 설치되어 있습니다.")
+                self.log("✅ Ollama 점검 완료.")
             self.set_cat_progress(0.2) 
 
-            # 2. Docker 체크 및 설치/실행
             if not shutil.which("docker"):
                 self.log("❌ Docker가 설치되어 있지 않습니다!")
                 if self.is_windows:
                     self.log("⏳ 윈도우용 Docker Desktop 다운로드 및 설치 중... (수 분 소요)")
                     cmd = ["winget", "install", "--id", "Docker.DockerDesktop", "-e", "--source", "winget", "--silent", "--accept-package-agreements", "--accept-source-agreements"]
-                    
                     if self.run_with_live_logs(cmd, startupinfo=startupinfo) == 0:
-                        self.log("✅ Docker 설치가 완료되었습니다!")
-                        messagebox.showinfo("재부팅 필요", "Docker 설치가 성공적으로 완료되었습니다.\n가상화 엔진(WSL2) 적용을 위해 PC를 재시작한 후 런처를 다시 실행해주세요.")
+                        self.log("✅ Docker 설치 완료!")
+                        messagebox.showinfo("재부팅 필요", "Docker 가상화 엔진(WSL2) 적용을 위해 PC를 재시작한 후 다시 실행해주세요.")
                         self.after(0, self.destroy)
                         return
                     else:
-                        self.log("❌ Docker 자동 설치 실패. 브라우저를 열어 수동 설치 유도 중...")
+                        self.log("❌ 자동 설치 실패. 브라우저 수동 설치를 유도합니다.")
                         webbrowser.open("https://docs.docker.com/desktop/install/windows-install/")
                         self.start_btn.configure(state="normal")
                         return
                 else:
-                    self.log("👉 맥북은 브라우저를 열어 다운로드 페이지로 이동합니다...")
+                    self.log("👉 맥 환경입니다. 브라우저에서 Docker Desktop을 설치해주세요.")
                     webbrowser.open("https://docs.docker.com/desktop/install/mac-install/")
                     self.start_btn.configure(state="normal")
                     return
             else:
-                self.log("✅ Docker가 이미 설치되어 있습니다.")
-                # 💡 핵심 추가: 도커가 설치되어 있다면 엔진을 깨웁니다.
+                self.log("✅ Docker 점검 완료.")
                 if not self.start_docker_engine():
                     self.log("❌ 도커 엔진을 켤 수 없습니다. Docker Desktop을 수동으로 실행해주세요.")
                     self.start_btn.configure(state="normal")
                     return
             
             self.set_cat_progress(0.3) 
-            self.log(">>> 시스템 점검 완료. 메인 로직으로 진입합니다.")
+            self.log(">>> 시스템 점검 통과. 모델 세팅을 시작합니다.")
             self.main_logic()
         except Exception as e:
             self.log(f"❌ 의존성 점검 중 오류 발생: {str(e)}")
@@ -281,79 +350,129 @@ class OpenClawLauncher(ctk.CTk):
 
     def main_logic(self):
         try:
-            import json
             startupinfo = None
             if self.is_windows:
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
-            self.log(">>> [긴급 복구] Ollama 엔진 및 모델 체크...")
-            self.stop_ollama()
-            ollama_env = os.environ.copy()
-            ollama_env["OLLAMA_HOST"] = "0.0.0.0"
+            selected_display = self.model_combo.get()
+            api_key = self.api_entry.get().strip()
 
-            subprocess.Popen(["ollama", "serve"], env=ollama_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, startupinfo=startupinfo)
-            
-            selected_model = self.model_combo.get()
-            clean_model_id = selected_model.replace("ollama/", "")
-            target_model = f"ollama/{clean_model_id}"
-            
-            self.pulling_model = True
-            self.log(f"⏳ '{clean_model_id}' 모델을 준비 중입니다. 진행 상황을 확인하세요.")
-            
-            pull_status = self.run_with_live_logs(["ollama", "pull", clean_model_id], startupinfo=startupinfo)
-            if pull_status != 0:
-                raise Exception(f"Ollama pull failed (exit {pull_status})")
+            if "직접 입력" in selected_display:
+                custom_val = self.custom_model_entry.get().strip()
+                if not custom_val:
+                    self.log("❌ 오류: 모델명(예: ollama/mistral)을 입력해주세요.")
+                    self.start_btn.configure(state="normal")
+                    self.set_cat_progress(0)
+                    return
                 
-            self.log(f"✅ 모델 준비 완료: {target_model}")
-            self.set_cat_progress(0.5) 
-            self.pulling_model = False
+                if "/" in custom_val:
+                    provider, target_model_id = custom_val.split("/", 1)
+                else:
+                    provider = "ollama"
+                    target_model_id = custom_val
+                
+                is_local = (provider == "ollama")
+                base_url = "http://host.docker.internal:11434/v1" if is_local else "https://api.openai.com/v1"
+                ctx_window = 32000
+                target_model_full = f"{provider}/{target_model_id}"
+            
+            else:
+                is_local = True
+                model_mapping = {
+                    "Llama 3.2:3b": ("ollama", "llama3.2", "http://host.docker.internal:11434/v1", 32000),
+                    "Qwen 2.5 Coder:7b": ("ollama", "qwen2.5-coder:7b", "http://host.docker.internal:11434/v1", 32000),
+                    "Llama 3.1:8b": ("ollama", "llama3.1", "http://host.docker.internal:11434/v1", 32000)
+                }
+
+                provider = "ollama"
+                target_model_id = "llama3.2"
+                base_url = "http://host.docker.internal:11434/v1"
+                ctx_window = 32000
+
+                for key, (prov, mid, url, ctx) in model_mapping.items():
+                    if key in selected_display:
+                        provider = prov
+                        target_model_id = mid
+                        base_url = url
+                        ctx_window = ctx
+                        break
+
+                target_model_full = f"{provider}/{target_model_id}"
+
+            if not is_local and not api_key:
+                self.log("⚠️ 주의: 외부 모델 지정 시 API 키가 필요할 수 있습니다.")
 
             # ---------------------------------------------------------
-            self.log(">>> [1] 설정 파일(JSON) 재생성...")
+            if is_local:
+                self.log(f">>> [로컬 모드] Ollama 엔진 구동 및 '{target_model_id}' 준비...")
+                self.stop_ollama()
+                ollama_env = os.environ.copy()
+                ollama_env["OLLAMA_HOST"] = "0.0.0.0"
+
+                subprocess.Popen(["ollama", "serve"], env=ollama_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, startupinfo=startupinfo)
+                
+                self.pulling_model = True
+                self.log(f"📥 로컬 모델({target_model_id})을 확인/다운로드합니다. (최초 1회, 수 분 소요)")
+                pull_status = self.run_with_live_logs(["ollama", "pull", target_model_id], startupinfo=startupinfo)
+                if pull_status != 0:
+                    raise Exception(f"Ollama pull failed")
+                    
+                self.log(f"✅ 로컬 모델 다운로드/검증 완료: {target_model_id}")
+                self.pulling_model = False
+            else:
+                self.log(f">>> [API 모드] 외부 접속을 준비합니다.")
+
+            self.set_cat_progress(0.5) 
+
+            # ---------------------------------------------------------
+            self.log(">>> [1] 설정 파일(JSON) 동적 생성 중...")
             config_dir = os.path.expanduser("~/.openclaw_data")
             os.makedirs(config_dir, exist_ok=True)
             config_path = os.path.join(config_dir, "config.json")
             
+            if os.path.exists(config_path):
+                try: os.remove(config_path)
+                except: pass
+
             config_data = {
-                "gateway": { "mode": "local" },
-                "agents": { "defaults": { "model": { "primary": target_model } } },
-                "models": {
-                    "providers": {
-                        "ollama": {
-                            "baseUrl": "http://host.docker.internal:11434/v1",
-                            "apiKey": "ollama-local",
-                            "api": "openai-completions",
-                            "models": [
-                                {
-                                    "id": target_model,
-                                    "name": clean_model_id,
-                                    "contextWindow": 32000
-                                }
-                            ]
-                        }
-                    }
-                }
+                "gateway": { 
+                    "mode": "local",
+                    "controlUi": { "dangerouslyAllowHostHeaderOriginFallback": True }
+                },
+                "agents": { "defaults": { "model": { "primary": target_model_full } } },
+                "models": { "providers": {} }
             }
+
+            if is_local:
+                config_data["models"]["providers"]["ollama"] = {
+                    "baseUrl": base_url,
+                    "api": "openai-completions",
+                    "models": [ { "id": target_model_full, "name": target_model_id, "contextWindow": ctx_window } ]
+                }
+            else:
+                config_data["models"]["providers"][provider] = {
+                    "apiKey": api_key,
+                    "baseUrl": base_url,   
+                    "api": "openai-responses",       
+                    "models": [ { "id": target_model_full, "name": target_model_id, "contextWindow": ctx_window } ]
+                }
             
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(config_data, f, indent=4)
+                
             self.set_cat_progress(0.6) 
 
             # ---------------------------------------------------------
             self.log(">>> [2] 도커 컨테이너 완전 재부팅...")
-            # 이미 start_docker_engine 단계에서 엔진이 보장되므로 정보 조회 생략 가능
             subprocess.run(["docker", "rm", "-f", "openclaw-main"], capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo)
             
-            image_name = "aaronkim33/openclaw:latest"
+            image_name = "ghcr.io/openclaw/openclaw:latest"
+            subprocess.run(["docker", "pull", image_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, startupinfo=startupinfo)
 
-            img_check = subprocess.run(["docker", "image", "inspect", image_name], capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo)
-            if img_check.returncode != 0:
-                self.log(f"⚠️ 이미지 '{image_name}' 다운로드를 시작합니다...")
-                pull_result = self.run_with_live_logs(["docker", "pull", image_name], startupinfo=startupinfo)
-                if pull_result != 0:
-                    raise Exception("image missing")
-                self.log(f"✅ 이미지 '{image_name}' 다운로드 완료!")
+            env_vars = []
+            if not is_local and api_key:
+                env_vars.extend(["-e", f"OPENAI_API_KEY={api_key}"])
 
             run_cmd = [
                 "docker", "run", "-d",
@@ -364,11 +483,13 @@ class OpenClawLauncher(ctk.CTk):
                 "-e", "OPENCLAW_GATEWAY_AUTH_ENABLED=true",
                 "-e", "OPENCLAW_GATEWAY_TOKEN=admin123",
                 "-e", "OPENCLAW_GATEWAY_MODE=local",
-                "-e", f"OPENCLAW_MODEL={target_model}",
+                "-e", f"OPENCLAW_MODEL={target_model_full}",
                 "-e", "OPENCLAW_CONFIG_PATH=/home/node/.openclaw/config.json",
+            ] + env_vars + [
                 image_name, 
                 "openclaw", "gateway", "run", 
                 "--port", "18789", 
+                "--bind", "lan",        
                 "--allow-unconfigured",
                 "--auth", "token",
                 "--token", "admin123"
@@ -378,13 +499,12 @@ class OpenClawLauncher(ctk.CTk):
             if run_result.returncode != 0:
                 raise Exception("docker run failed")
             
-            self.set_cat_progress(0.7) 
+            self.set_cat_progress(0.7)
             
             # ---------------------------------------------------------
-            self.log(">>> [3] 로그 분석 중... ")
+            self.log(">>> [3] 백엔드 시스템 로그 분석 중... ")
             success = False
-            max_attempts = 20
-            for i in range(max_attempts): 
+            for i in range(20): 
                 try:
                     time.sleep(3)
                     log_check = subprocess.run(["docker", "logs", "openclaw-main"], capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo, timeout=10)
@@ -394,16 +514,13 @@ class OpenClawLauncher(ctk.CTk):
                         last_line = logs.strip().splitlines()[-1]
                         self.log(f"[도커 로그] {last_line}")
                     
-                    if target_model in logs and ("listening on" in logs.lower() or "gateway started" in logs.lower()):
-                        self.log(f"🎊 복구 성공! '{target_model}' 인식 확인!")
+                    if ("listening on" in logs.lower() or "gateway started" in logs.lower()):
+                        self.log(f"🎊 통합 성공! '{target_model_id}' 세팅 완료!")
                         proxy_js = "require('net').createServer(c=>{let s=require('net').connect(18789,'127.0.0.1');c.pipe(s).pipe(c);s.on('error',()=>c.destroy());c.on('error',()=>s.destroy());}).listen(18790,'0.0.0.0')"
                         subprocess.run(["docker", "exec", "-d", "openclaw-main", "node", "-e", proxy_js], startupinfo=startupinfo, timeout=10)
                         success = True
                         break
                     
-                    if "anthropic" in logs.lower():
-                        self.log("⚠️ 경고: 아직 Claude가 잡혀있습니다. 재시도 중...")
-                        
                     self.set_cat_progress(0.7 + (i * 0.015)) 
                 except subprocess.TimeoutExpired:
                     continue
@@ -415,10 +532,10 @@ class OpenClawLauncher(ctk.CTk):
                 self.set_cat_progress(1.0)
                 url = "http://127.0.0.1:18790/?token=admin123" 
                 webbrowser.open(url)
-                self.log("🚀 복구 완료! 브라우저에서 OpenClaw 대시보드를 확인해주세요.")
+                self.log("🚀 실행 완료! 브라우저에서 대시보드를 확인해주세요.")
             else:
                 self.set_cat_progress(0)
-                self.log("❌ 복구 실패: 로그를 다시 확인해야 합니다.")
+                self.log("❌ 실행 실패: 도커 로그를 다시 확인해야 합니다.")
 
             self.start_btn.configure(state="normal")
         except Exception as e:
@@ -435,7 +552,7 @@ class OpenClawLauncher(ctk.CTk):
 
     def stop_ollama(self):
         if getattr(self, "pulling_model", False):
-            self.log("⚠️ 모델 준비 중에는 Ollama를 중지할 수 없습니다.")
+            self.log("⚠️ 모델 다운로드 중에는 Ollama를 중지할 수 없습니다.")
             return
         startupinfo = None
         if self.is_windows:
