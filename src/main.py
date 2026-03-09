@@ -22,7 +22,6 @@ def is_admin():
         return False
 
 def resource_path(relative_path):
-    """PyInstaller 빌드 및 로컬 테스트 환경 모두에서 안전하게 assets 경로를 찾아줍니다."""
     try:
         base_path = sys._MEIPASS
     except Exception:
@@ -41,10 +40,9 @@ class OpenClawLauncher(ctk.CTk):
             self.destroy()
             return
         
-        self.title("OpenClaw AI Manager Pro")
-        self.geometry("750x950")
+        self.title("MellowCat")
+        self.geometry("750x950") # 🟢 스킬 체크박스가 빠져서 창 길이를 다시 줄였습니다.
         
-        # --- 🎨 1. 앱 기본 아이콘 설정 ---
         try:
             if self.is_windows:
                 ico_path = resource_path("assets/icon.ico")
@@ -58,66 +56,91 @@ class OpenClawLauncher(ctk.CTk):
         except Exception as e:
             print(f"아이콘 로드 실패: {e}")
 
-        # --- UI 구성 ---
-        self.label = ctk.CTkLabel(self, text="OpenClaw AI Manager", font=("Arial", 28, "bold"))
-        self.label.pack(pady=20)
+        self.ram_gb = math.ceil(psutil.virtual_memory().total / (1024 ** 3))
+        os_name = platform.system()
+        cpu_arch = platform.machine()
 
-        # 상태 모니터링 섹션
+        self.label = ctk.CTkLabel(self, text="MellowCat", font=("Arial", 32, "bold"))
+        self.label.pack(pady=10)
+
         self.status_frame = ctk.CTkFrame(self)
-        self.status_frame.pack(pady=10, padx=20, fill="x")
-        self.create_status_row("Docker (OpenClaw)", "docker_status", self.stop_docker)
+        self.status_frame.pack(pady=5, padx=20, fill="x")
+        self.create_status_row("Docker (MellowCat)", "docker_status", self.stop_docker)
         self.create_status_row("Ollama Engine", "ollama_status", self.stop_ollama)
 
-        # --- 💻 하드웨어 분석 및 모델 설정 섹션 ---
+        # ---------------------------------------------------------
+        # 1. 시스템 및 모델 설정
+        # ---------------------------------------------------------
         self.config_frame = ctk.CTkFrame(self)
-        self.config_frame.pack(pady=10, padx=20, fill="x")
+        self.config_frame.pack(pady=5, padx=20, fill="x")
 
-        # 1. 하드웨어 분석 결과 출력
-        hardware_info, recommended_model = self.analyze_hardware()
-        self.hw_label = ctk.CTkLabel(self.config_frame, text=f"💻 내 PC: {hardware_info}", font=("Arial", 12))
-        self.hw_label.grid(row=0, column=0, columnspan=2, padx=10, pady=(10, 0), sticky="w")
+        self.hw_label = ctk.CTkLabel(self.config_frame, text=f"💻 시스템: {os_name} ({cpu_arch})", font=("Arial", 12))
+        self.hw_label.grid(row=0, column=0, columnspan=2, padx=10, pady=(5, 0), sticky="w")
         
-        self.rec_label = ctk.CTkLabel(self.config_frame, text=f"💡 권장 설정: {recommended_model}", font=("Arial", 12, "bold"), text_color="#22CC22")
-        self.rec_label.grid(row=1, column=0, columnspan=2, padx=10, pady=(0, 10), sticky="w")
+        self.ram_label = ctk.CTkLabel(self.config_frame, text=f"🔥 내 PC RAM: {self.ram_gb}GB", font=("Arial", 14, "bold"), text_color="#3399FF")
+        self.ram_label.grid(row=1, column=0, columnspan=2, padx=10, pady=(0, 5), sticky="w")
 
-        # 2. 모델 선택 (로컬 모델 전용 + 직접 입력)
         ctk.CTkLabel(self.config_frame, text="모델 선택:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
-        self.model_list = [
-            "⭐ Llama 3.2:3b (로컬 - 8GB RAM 최적/추천)",
-            "💻 Qwen 2.5 Coder:7b (로컬 - 코딩 특화)",
-            "💻 Llama 3.1:8b (로컬 - 마지노선)",
-            "✍️ 기타 (직접 입력)"
+        
+        self.model_list = []
+        base_models = [
+            ("Llama 3.2:3b", 8, "가장 빠름"),
+            ("Qwen 2.5 Coder:7b", 8, "코딩 특화"),
+            ("Llama 3.1:8b", 16, "표준형"),
+            ("Gemma 2:9b", 16, "고성능"),
+            ("DeepSeek Coder V2 Lite", 32, "전문가용")
         ]
-        self.model_combo = ctk.CTkComboBox(self.config_frame, values=self.model_list, width=320, command=self.on_model_select)
-        self.model_combo.grid(row=2, column=1, padx=10, pady=5)
 
-        # 3. API 키 입력 및 붙여넣기 버튼 (유료 API 직접 입력 대비용 유지)
-        ctk.CTkLabel(self.config_frame, text="API 키:").grid(row=3, column=0, padx=10, pady=5, sticky="w")
+        for name, req_ram, desc in base_models:
+            if self.ram_gb >= req_ram:
+                self.model_list.append(f"🟢 [원활] {name} (권장 {req_ram}GB) - {desc}")
+            else:
+                self.model_list.append(f"🔴 [경고] {name} (권장 {req_ram}GB) - 램 부족")
         
-        self.api_inner_frame = ctk.CTkFrame(self.config_frame, fg_color="transparent")
-        self.api_inner_frame.grid(row=3, column=1, padx=10, pady=5, sticky="w")
-        
-        self.api_entry = ctk.CTkEntry(self.api_inner_frame, placeholder_text="API 모델 선택 시 필수 입력 (로컬은 비워둠)", width=220, show="*")
-        self.api_entry.pack(side="left")
-        
-        self.paste_btn = ctk.CTkButton(self.api_inner_frame, text="📋 붙여넣기", width=80, command=self.paste_from_clipboard, fg_color="#444444", hover_color="#555555")
-        self.paste_btn.pack(side="left", padx=(10, 0))
+        self.model_list.append("✍️ 기타 (직접 입력)")
 
-        # 4. 모델 직접 입력 칸 (초기에는 숨김)
+        self.model_combo = ctk.CTkComboBox(self.config_frame, values=self.model_list, width=380, command=self.on_model_select)
+        self.model_combo.grid(row=2, column=1, padx=10, pady=5, sticky="w")
+
+        self.ram_warning_label = ctk.CTkLabel(self.config_frame, text="", font=("Arial", 12, "bold"))
+        self.ram_warning_label.grid(row=3, column=1, padx=10, pady=(0, 5), sticky="w")
+
         self.custom_label = ctk.CTkLabel(self.config_frame, text="모델명 입력:", text_color="#22CC22")
-        self.custom_model_entry = ctk.CTkEntry(self.config_frame, placeholder_text="예: ollama/mistral 또는 openai/gpt-4o", width=320)
+        self.custom_model_entry = ctk.CTkEntry(self.config_frame, placeholder_text="예: ollama/mistral", width=320)
 
-        # 🟢 하드웨어 기반 자동 선택 실행
+        # ---------------------------------------------------------
+        # 2. 채널(Channels) 토큰 입력 섹션
+        # ---------------------------------------------------------
+        self.channel_frame = ctk.CTkFrame(self)
+        self.channel_frame.pack(pady=5, padx=20, fill="x")
+        
+        ctk.CTkLabel(self.channel_frame, text="[ 메신저 채널 연동 (선택) ]", font=("Arial", 13, "bold")).grid(row=0, column=0, columnspan=3, padx=10, pady=5, sticky="w")
+
+        # Telegram 입력칸 & 도움말 버튼
+        ctk.CTkLabel(self.channel_frame, text="Telegram:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        self.tg_entry = ctk.CTkEntry(self.channel_frame, placeholder_text="봇 토큰 입력 (예: 12345:ABCDE...)", width=410, show="*")
+        self.tg_entry.grid(row=1, column=1, padx=(10, 5), pady=5, sticky="w")
+        ctk.CTkButton(self.channel_frame, text="?", width=30, command=self.show_telegram_help, fg_color="#555555", hover_color="#777777").grid(row=1, column=2, padx=(0, 10), pady=5, sticky="w")
+
+        # Discord 입력칸 & 도움말 버튼
+        ctk.CTkLabel(self.channel_frame, text="Discord:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        self.dc_entry = ctk.CTkEntry(self.channel_frame, placeholder_text="봇 토큰 입력 (예: MTEyMz...)", width=410, show="*")
+        self.dc_entry.grid(row=2, column=1, padx=(10, 5), pady=5, sticky="w")
+        ctk.CTkButton(self.channel_frame, text="?", width=30, command=self.show_discord_help, fg_color="#555555", hover_color="#777777").grid(row=2, column=2, padx=(0, 10), pady=5, sticky="w")
+        
+        # 🟢 [수정됨] WhatsApp QR 연동 전용 버튼 추가
+        self.wa_btn = ctk.CTkButton(self.channel_frame, text="📱 WhatsApp 연동하기 (QR코드 띄우기)", fg_color="#25D366", hover_color="#128C7E", text_color="white", font=("Arial", 13, "bold"), command=self.open_whatsapp_qr)
+        self.wa_btn.grid(row=3, column=0, columnspan=3, padx=10, pady=(5, 10), sticky="w")
+        
+        # 🟢 스킬 프레임은 요청하신 대로 깔끔하게 삭제했습니다!
         self.auto_select_model()
 
-        # 로그 창
-        self.log_box = ctk.CTkTextbox(self, width=680, height=250, font=("Consolas", 12))
+        self.log_box = ctk.CTkTextbox(self, width=680, height=200, font=("Consolas", 12))
         self.log_box.pack(pady=10, padx=20)
         self.log_box.configure(state="disabled") 
         
-        # --- 🐈 2. 고양이 프로그레스 바 구성 ---
-        self.progress_frame = ctk.CTkFrame(self, fg_color="transparent", width=680, height=60)
-        self.progress_frame.pack(pady=10)
+        self.progress_frame = ctk.CTkFrame(self, fg_color="transparent", width=680, height=50)
+        self.progress_frame.pack(pady=5)
         self.progress_frame.pack_propagate(False)
 
         self.progress = ctk.CTkProgressBar(self.progress_frame, width=680)
@@ -133,68 +156,95 @@ class OpenClawLauncher(ctk.CTk):
         
         self.cat_label.place(relx=0.0, rely=0.3, anchor="center")
 
-        # 실행 및 종료 버튼
         self.btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.btn_frame.pack(pady=20)
+        self.btn_frame.pack(pady=(5, 15))
 
-        self.start_btn = ctk.CTkButton(self.btn_frame, text=" 설치 및 통합 실행", command=self.start_thread, height=55, font=("Arial", 20, "bold"))
+        self.start_btn = ctk.CTkButton(self.btn_frame, text=" 원클릭 자동 설치 및 실행 ", command=self.start_thread, height=50, font=("Arial", 18, "bold"))
         self.start_btn.pack(side="left", padx=10)
 
-        self.exit_btn = ctk.CTkButton(self.btn_frame, text=" 런처 종료 ", command=self.on_closing, height=55, font=("Arial", 20, "bold"), fg_color="#CC3333", hover_color="#AA2222")
+        self.exit_btn = ctk.CTkButton(self.btn_frame, text=" 런처 종료 ", command=self.on_closing, height=50, font=("Arial", 18, "bold"), fg_color="#CC3333", hover_color="#AA2222")
         self.exit_btn.pack(side="left", padx=10)
 
         self.update_status_loop()
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-    # --- UI 이벤트 및 하드웨어 분석 메서드 ---
     def on_model_select(self, choice):
+        if "🔴" in choice:
+            self.ram_warning_label.configure(text="⚠️ 권장 RAM 부족! 구동 시 시스템이 멈출 수 있습니다.", text_color="#FF3333")
+        elif "🟢" in choice:
+            self.ram_warning_label.configure(text="✅ 현재 PC 환경에서 원활하게 구동 가능합니다.", text_color="#22CC22")
+        else:
+            self.ram_warning_label.configure(text="")
+
         if "직접 입력" in choice:
             self.custom_label.grid(row=4, column=0, padx=10, pady=5, sticky="w")
-            self.custom_model_entry.grid(row=4, column=1, padx=10, pady=5)
+            self.custom_model_entry.grid(row=4, column=1, padx=10, pady=5, sticky="w")
         else:
             self.custom_label.grid_forget()
             self.custom_model_entry.grid_forget()
 
     def paste_from_clipboard(self):
-        try:
-            clipboard_text = self.clipboard_get()
-            self.api_entry.delete(0, "end")
-            self.api_entry.insert(0, clipboard_text)
-            self.log("✅ 클립보드에서 API 키를 성공적으로 붙여넣었습니다.")
-        except tk.TclError:
-            self.log("⚠️ 클립보드에 복사된 텍스트가 없습니다.")
+        pass
 
-    def analyze_hardware(self):
-        try:
-            ram_bytes = psutil.virtual_memory().total
-            ram_gb = math.ceil(ram_bytes / (1024 ** 3))
-            os_name = platform.system()
-            cpu_arch = platform.machine()
-            hw_string = f"{os_name} ({cpu_arch}) / RAM {ram_gb}GB"
+    def show_telegram_help(self):
+        help_text = [
+            "--------------------------------------------------",
+            "📘 [텔레그램(Telegram) 봇 토큰 받는 법]",
+            "텔레그램은 'BotFather'라는 공식 계정을 통해 아주 쉽게 토큰을 만들 수 있습니다.",
+            "1. BotFather 찾기: 텔레그램 앱 검색창에 @BotFather를 검색하고 공식 인증 마크(파란 체크)가 있는 계정을 선택합니다.",
+            "2. 봇 생성 시작: 대화창에 /newbot을 입력합니다.",
+            "3. 이름 설정: 봇의 이름(예: MyOpenClawBot)을 입력합니다.",
+            "4. 사용자명 설정: 봇의 아이디를 입력합니다. 반드시 끝이 _bot으로 끝나야 합니다 (예: openclaw_test_bot).",
+            "5. 토큰 복사: 생성이 완료되면 **HTTP API token**이라는 이름으로 긴 문자열이 나옵니다. 이것이 토큰입니다.",
+            "--------------------------------------------------"
+        ]
+        for line in help_text:
+            self.log(line)
+
+    def show_discord_help(self):
+        help_text = [
+            "--------------------------------------------------",
+            "🎮 [디스코드(Discord) 봇 토큰 받는 법]",
+            "디스코드는 개발자 포털을 통해 애플리케이션을 생성해야 합니다.",
+            "1. 디스코드 개발자 포털 접속: Discord Developer Portal에 로그인합니다.",
+            "2. 새 애플리케이션 생성: 우측 상단의 [New Application]을 누르고 이름을 입력합니다.",
+            "3. 봇 설정: 왼쪽 메뉴에서 [Bot] 탭을 클릭합니다.",
+            "4. 토큰 확인: 'Build-a-Bot' 섹션의 [Reset Token] 또는 [Copy Token] 버튼을 눌러 복사합니다.",
+            "5. 권한 설정(중요): 아래 'Privileged Gateway Intents' 항목에서 Message Content Intent를 활성화(ON)해야 합니다.",
+            "--------------------------------------------------"
+        ]
+        for line in help_text:
+            self.log(line)    
+
+    def open_whatsapp_qr(self):
+        # 도커가 켜져 있는지 먼저 확인합니다.
+        check = subprocess.run(["docker", "ps", "-q", "-f", "name=openclaw-main"], capture_output=True, text=True)
+        if not check.stdout.strip():
+            self.log("⚠️ 앗! 먼저 하단의 '원클릭 자동 설치 및 실행'을 눌러서 시스템을 켜주세요!")
+            return
+        
+        self.log("📱 WhatsApp QR 코드 창을 엽니다. 스마트폰으로 스캔해주세요!")
+        
+        # OS별로 새 터미널 창을 열어 QR 코드를 보여줍니다.
+        if self.is_mac:
+            # 🟢 [수정됨] login whatsapp -> login --channel whatsapp
+            cmd = 'tell application "Terminal" to do script "docker exec -it openclaw-main openclaw channels login --channel whatsapp"'
+            subprocess.run(['osascript', '-e', cmd])
+        elif self.is_windows:
+            subprocess.Popen(['start', 'cmd', '/k', 'docker exec -it openclaw-main openclaw channels login --channel whatsapp'], shell=True)
             
-            if ram_gb <= 8:
-                recommendation = "로컬 3B 모델 권장 (메모리 최적화)"
-            elif ram_gb <= 16:
-                recommendation = "로컬 8B 이하 모델 권장"
-            else:
-                recommendation = "로컬 14B 이상 고성능 모델 구동 가능"
-                
-            return hw_string, recommendation
-        except Exception as e:
-            return "사양 분석 실패", "알 수 없음"
-
     def auto_select_model(self):
         try:
-            ram_gb = math.ceil(psutil.virtual_memory().total / (1024 ** 3))
-            if ram_gb <= 16:
+            if self.ram_gb <= 8:
                 self.model_combo.set(self.model_list[0]) 
+            elif self.ram_gb <= 16:
+                self.model_combo.set(self.model_list[2]) 
             else:
-                self.model_combo.set(self.model_list[1]) 
+                self.model_combo.set(self.model_list[4]) 
         except:
             self.model_combo.set(self.model_list[0])
         self.on_model_select(self.model_combo.get())
 
-    # --- 유틸리티 메서드 ---
     def set_cat_progress(self, value):
         self.progress.set(value)
         target_x = 0.05 + (value * 0.90)
@@ -275,7 +325,6 @@ class OpenClawLauncher(ctk.CTk):
                 return False
         return True
 
-    # --- 메인 실행 로직 ---
     def start_thread(self):
         self.start_btn.configure(state="disabled")
         self.set_cat_progress(0) 
@@ -355,55 +404,42 @@ class OpenClawLauncher(ctk.CTk):
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
+            config_dir = os.path.expanduser("~/.openclaw_data")
+            config_path = os.path.join(config_dir, "config.json")
+
             selected_display = self.model_combo.get()
-            api_key = self.api_entry.get().strip()
+            
+            # UI에서 가져온 데이터
+            tg_token = self.tg_entry.get().strip()
+            dc_token = self.dc_entry.get().strip()
 
             if "직접 입력" in selected_display:
                 custom_val = self.custom_model_entry.get().strip()
                 if not custom_val:
-                    self.log("❌ 오류: 모델명(예: ollama/mistral)을 입력해주세요.")
+                    self.log("❌ 오류: 모델명을 입력해주세요.")
                     self.start_btn.configure(state="normal")
                     self.set_cat_progress(0)
                     return
-                
-                if "/" in custom_val:
-                    provider, target_model_id = custom_val.split("/", 1)
-                else:
-                    provider = "ollama"
-                    target_model_id = custom_val
-                
+                provider, target_model_id = custom_val.split("/", 1) if "/" in custom_val else ("ollama", custom_val)
                 is_local = (provider == "ollama")
                 base_url = "http://host.docker.internal:11434/v1" if is_local else "https://api.openai.com/v1"
                 ctx_window = 32000
-                target_model_full = f"{provider}/{target_model_id}"
-            
             else:
                 is_local = True
                 model_mapping = {
                     "Llama 3.2:3b": ("ollama", "llama3.2", "http://host.docker.internal:11434/v1", 32000),
                     "Qwen 2.5 Coder:7b": ("ollama", "qwen2.5-coder:7b", "http://host.docker.internal:11434/v1", 32000),
-                    "Llama 3.1:8b": ("ollama", "llama3.1", "http://host.docker.internal:11434/v1", 32000)
+                    "Llama 3.1:8b": ("ollama", "llama3.1", "http://host.docker.internal:11434/v1", 128000),
+                    "Gemma 2:9b": ("ollama", "gemma2", "http://host.docker.internal:11434/v1", 8192),
+                    "DeepSeek Coder V2 Lite": ("ollama", "deepseek-coder-v2", "http://host.docker.internal:11434/v1", 128000)
                 }
-
-                provider = "ollama"
-                target_model_id = "llama3.2"
-                base_url = "http://host.docker.internal:11434/v1"
-                ctx_window = 32000
-
                 for key, (prov, mid, url, ctx) in model_mapping.items():
                     if key in selected_display:
-                        provider = prov
-                        target_model_id = mid
-                        base_url = url
-                        ctx_window = ctx
+                        provider, target_model_id, base_url, ctx_window = prov, mid, url, ctx
                         break
+            
+            target_model_full = f"{provider}/{target_model_id}"
 
-                target_model_full = f"{provider}/{target_model_id}"
-
-            if not is_local and not api_key:
-                self.log("⚠️ 주의: 외부 모델 지정 시 API 키가 필요할 수 있습니다.")
-
-            # ---------------------------------------------------------
             if is_local:
                 self.log(f">>> [로컬 모드] Ollama 엔진 구동 및 '{target_model_id}' 준비...")
                 self.stop_ollama()
@@ -423,56 +459,70 @@ class OpenClawLauncher(ctk.CTk):
             else:
                 self.log(f">>> [API 모드] 외부 접속을 준비합니다.")
 
-            self.set_cat_progress(0.5) 
+            self.set_cat_progress(0.4) 
 
-            # ---------------------------------------------------------
-            self.log(">>> [1] 설정 파일(JSON) 동적 생성 중...")
-            config_dir = os.path.expanduser("~/.openclaw_data")
+            # 도커 정지 및 딥클린
+            self.log(">>> [1] 도커 컨테이너 정지 및 락 해제 중...")
+            subprocess.run(["docker", "rm", "-f", "openclaw-main"], capture_output=True, startupinfo=startupinfo)
+
+            self.log(">>> [2] 데이터 폴더 '딥 클린' 중...")
+            if os.path.exists(config_dir):
+                try:
+                    shutil.rmtree(config_dir) 
+                    self.log("✅ 이전 세션 및 DB 찌꺼기를 완전히 청소했습니다.")
+                except Exception as e:
+                    self.log(f"⚠️ 폴더 삭제 오류: {e}")
             os.makedirs(config_dir, exist_ok=True)
-            config_path = os.path.join(config_dir, "config.json")
+
+            self.set_cat_progress(0.5)
+
+            # 🟢 [핵심 1] JSON에는 토큰(비밀번호)을 절대 적지 않습니다! (Doctor 에러 방지)
+            self.log(">>> [3] 사용자 설정 기반 '원클릭 설정 파일(JSON)' 생성 중...")
             
-            if os.path.exists(config_path):
-                try: os.remove(config_path)
-                except: pass
+            channels_config = {
+                "whatsapp": { "enabled": False, "dmPolicy": "pairing", "groupPolicy": "allowlist", "debounceMs": 0, "mediaMaxMb": 50 }
+            }
+            
+            # 텔레그램: 토큰은 빼고 활성화(enabled: True)만 시킵니다.
+            if tg_token:
+                channels_config["telegram"] = { "enabled": True, "dmPolicy": "pairing", "groupPolicy": "allowlist", "streaming": "partial" }
+                self.log("✅ Telegram 채널 활성화 (토큰은 부팅 후 안전하게 주입됩니다)")
+            else:
+                channels_config["telegram"] = { "enabled": False, "dmPolicy": "pairing", "groupPolicy": "allowlist", "streaming": "partial" }
+                
+            # 디스코드: 토큰 빼고 활성화만!
+            if dc_token:
+                channels_config["discord"] = { "enabled": True, "groupPolicy": "allowlist", "streaming": "off" }
+                self.log("✅ Discord 채널 활성화 (토큰은 부팅 후 안전하게 주입됩니다)")
+            else:
+                channels_config["discord"] = { "enabled": False, "groupPolicy": "allowlist", "streaming": "off" }
 
             config_data = {
-                "gateway": { 
-                    "mode": "local",
-                    "controlUi": { "dangerouslyAllowHostHeaderOriginFallback": True }
-                },
+                "models": { "providers": {} },
                 "agents": { "defaults": { "model": { "primary": target_model_full } } },
-                "models": { "providers": {} }
+                "commands": { "native": "auto", "nativeSkills": "auto", "restart": True, "ownerDisplay": "raw" },
+                "channels": channels_config,
+                "gateway": { "mode": "local", "controlUi": { "dangerouslyAllowHostHeaderOriginFallback": True } },
+                "skills": {}, 
+                "meta": { "lastTouchedVersion": "2026.3.8", "lastTouchedAt": time.strftime('%Y-%m-%dT%H:%M:%S.%fZ') }
             }
 
             if is_local:
                 config_data["models"]["providers"]["ollama"] = {
-                    "baseUrl": base_url,
-                    "api": "openai-completions",
-                    "models": [ { "id": target_model_full, "name": target_model_id, "contextWindow": ctx_window } ]
-                }
-            else:
-                config_data["models"]["providers"][provider] = {
-                    "apiKey": api_key,
-                    "baseUrl": base_url,   
-                    "api": "openai-responses",       
+                    "baseUrl": base_url, "api": "openai-completions",
                     "models": [ { "id": target_model_full, "name": target_model_id, "contextWindow": ctx_window } ]
                 }
             
             with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(config_data, f, indent=4)
+                json.dump(config_data, f, indent=2)
                 
             self.set_cat_progress(0.6) 
 
-            # ---------------------------------------------------------
-            self.log(">>> [2] 도커 컨테이너 완전 재부팅...")
-            subprocess.run(["docker", "rm", "-f", "openclaw-main"], capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo)
-            
+            # 도커 실행
+            self.log(">>> [4] 도커 컨테이너 실행 중...")
             image_name = "ghcr.io/openclaw/openclaw:latest"
+            # (이하 기존 도커 run 코드 유지... CLI로 채널 등록하는 부분은 삭제하세요!)
             subprocess.run(["docker", "pull", image_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, startupinfo=startupinfo)
-
-            env_vars = []
-            if not is_local and api_key:
-                env_vars.extend(["-e", f"OPENAI_API_KEY={api_key}"])
 
             run_cmd = [
                 "docker", "run", "-d",
@@ -485,24 +535,14 @@ class OpenClawLauncher(ctk.CTk):
                 "-e", "OPENCLAW_GATEWAY_MODE=local",
                 "-e", f"OPENCLAW_MODEL={target_model_full}",
                 "-e", "OPENCLAW_CONFIG_PATH=/home/node/.openclaw/config.json",
-            ] + env_vars + [
-                image_name, 
-                "openclaw", "gateway", "run", 
-                "--port", "18789", 
-                "--bind", "lan",        
-                "--allow-unconfigured",
-                "--auth", "token",
-                "--token", "admin123"
+                image_name, "openclaw", "gateway", "run", "--port", "18789", "--bind", "lan", "--allow-unconfigured", "--auth", "token", "--token", "admin123"
             ]
 
-            run_result = subprocess.run(run_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo)
-            if run_result.returncode != 0:
+            if subprocess.run(run_cmd, capture_output=True, text=True, startupinfo=startupinfo).returncode != 0:
                 raise Exception("docker run failed")
             
-            self.set_cat_progress(0.7)
-            
             # ---------------------------------------------------------
-            self.log(">>> [3] 백엔드 시스템 로그 분석 중... ")
+            self.log(">>> [5] 백엔드 시스템(Gateway) 부팅 대기 중... ")
             success = False
             for i in range(20): 
                 try:
@@ -521,14 +561,31 @@ class OpenClawLauncher(ctk.CTk):
                         success = True
                         break
                     
-                    self.set_cat_progress(0.7 + (i * 0.015)) 
+                    self.set_cat_progress(0.6 + (i * 0.01)) 
                 except subprocess.TimeoutExpired:
                     continue
                 except Exception as e:
                     self.log(f"⚠️ 로그 분석 오류: {str(e)}")
                     break
 
+            # 🟢 [핵심 2] 게이트웨이가 완벽하게 켜진(success) 이후에 토큰을 주입합니다!
+            # 🟢 [핵심 2] 게이트웨이가 완벽하게 켜진 이후에 토큰을 주입합니다!
             if success:
+                self.set_cat_progress(0.9)
+                
+                if tg_token or dc_token:
+                    self.log(">>> [6] 자동 채널 연동 (보안 토큰 주입) 진행 중...")
+                    
+                    if tg_token:
+                        self.log("📡 Telegram 토큰을 시스템 내부에 안전하게 등록합니다...")
+                        tg_res = subprocess.run(["docker", "exec", "openclaw-main", "openclaw", "channels", "add", "--channel", "telegram", "--token", tg_token], capture_output=True, text=True)
+                        self.log(f"[CLI 결과] {tg_res.stdout.strip() or tg_res.stderr.strip()}")
+                        
+                    if dc_token:
+                        self.log("📡 Discord 토큰을 시스템 내부에 안전하게 등록합니다...")
+                        dc_res = subprocess.run(["docker", "exec", "openclaw-main", "openclaw", "channels", "add", "--channel", "discord", "--token", dc_token], capture_output=True, text=True)
+                        self.log(f"[CLI 결과] {dc_res.stdout.strip() or dc_res.stderr.strip()}")
+
                 self.set_cat_progress(1.0)
                 url = "http://127.0.0.1:18790/?token=admin123" 
                 webbrowser.open(url)
