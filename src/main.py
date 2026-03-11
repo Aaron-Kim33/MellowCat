@@ -335,11 +335,29 @@ class OpenClawLauncher(ctk.CTk):
         self.wa_btn = ctk.CTkButton(ch_frame, text="📱 WhatsApp 연동하기 (QR 코드 스캔)", fg_color="#25D366", hover_color="#128C7E", text_color="white", font=("Arial", 13, "bold"), command=self._open_whatsapp_qr)
         self.wa_btn.grid(row=5, column=0, columnspan=3, padx=10, pady=(6, 8), sticky="ew")
 
+        # 🟢 서버 Allowlist 관리 섹션
+        allowlist_frame = ctk.CTkFrame(self.scroll_frame, fg_color="#2D2D2D", corner_radius=8)
+        allowlist_frame.pack(pady=4, padx=4, fill="x")
+        allowlist_frame.columnconfigure(2, weight=1)
+
+        ctk.CTkLabel(allowlist_frame, text="[ 🛡️ 서버/그룹 Allowlist 관리 ]", font=("Arial", 13, "bold"), text_color="#ADD8E6").grid(row=0, column=0, columnspan=4, padx=14, pady=(8, 4), sticky="w")
+        
+        ctk.CTkLabel(allowlist_frame, text="채널 선택:", width=60, anchor="w").grid(row=1, column=0, padx=(14, 4), pady=(0, 8), sticky="w")
+        self.allowlist_ch_combo = ctk.CTkComboBox(allowlist_frame, values=["discord", "telegram", "slack"], width=100)
+        self.allowlist_ch_combo.grid(row=1, column=1, padx=4, pady=(0, 8), sticky="w")
+
+        # UI 문구를 조금 명확하게 수정했습니다.
+        self.allowlist_id_entry = ctk.CTkEntry(allowlist_frame, placeholder_text="서버(Guild) ID 또는 사용자 ID", width=200)
+        self.allowlist_id_entry.grid(row=1, column=2, padx=4, pady=(0, 8), sticky="ew")
+
+        ctk.CTkButton(allowlist_frame, text="➕ 추가", width=60, command=self._add_to_allowlist, fg_color="#3B82F6", hover_color="#2563EB").grid(row=1, column=3, padx=(4, 14), pady=(0, 8), sticky="w")
+        # ─────────────────────────────────────────────────────────────
+
         pairing_frame = ctk.CTkFrame(self.scroll_frame, fg_color="#1A1A2E", corner_radius=8)
         pairing_frame.pack(pady=4, padx=4, fill="x")
         pairing_frame.columnconfigure(2, weight=1)
 
-        ctk.CTkLabel(pairing_frame, text="[ 🔐 봇 사용 권한 승인 (Pairing) ]", font=("Arial", 13, "bold"), text_color="#FFB347").grid(row=0, column=0, columnspan=4, padx=14, pady=(8, 4), sticky="w")
+        ctk.CTkLabel(pairing_frame, text="[ 🔐 봇 1:1 사용 권한 승인 (DM 페어링) ]", font=("Arial", 13, "bold"), text_color="#FFB347").grid(row=0, column=0, columnspan=4, padx=14, pady=(8, 4), sticky="w")
         ctk.CTkLabel(pairing_frame, text="채널:", width=50, anchor="w").grid(row=1, column=0, padx=(14, 4), pady=(0, 8), sticky="w")
         self.pairing_ch_combo = ctk.CTkComboBox(pairing_frame, values=["telegram", "whatsapp", "discord", "slack"], width=110)
         self.pairing_ch_combo.grid(row=1, column=1, padx=4, pady=(0, 8), sticky="w")
@@ -348,6 +366,78 @@ class OpenClawLauncher(ctk.CTk):
         self.pairing_entry.grid(row=1, column=2, padx=4, pady=(0, 8), sticky="w")
 
         ctk.CTkButton(pairing_frame, text="✅ 승인", width=70, command=self._approve_pairing).grid(row=1, column=3, padx=(4, 14), pady=(0, 8), sticky="w")
+
+    # 🟢 [핵심 변경 1] 공식 문서의 Discord guilds 구조 완벽 대응
+    def _add_to_allowlist(self):
+        channel = self.allowlist_ch_combo.get()
+        target_id = self.allowlist_id_entry.get().strip()
+        
+        if not target_id:
+            self.log("⚠️ 추가할 서버/사용자 ID를 입력해주세요.")
+            return
+
+        config_path = os.path.expanduser("~/.openclaw_data/config.json")
+        if not os.path.exists(config_path):
+            self.log("⚠️ config.json 파일이 없습니다. 먼저 봇을 실행해주세요.")
+            return
+
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+
+            if "channels" not in config_data or channel not in config_data["channels"]:
+                self.log(f"⚠️ {channel} 설정이 없습니다. 먼저 토큰을 등록하고 실행해주세요.")
+                return
+
+            ch_config = config_data["channels"][channel]
+
+            # Discord는 공식 문서에 따라 guilds 구조를 사용합니다.
+            if channel == "discord":
+                if "guilds" not in ch_config:
+                    ch_config["guilds"] = {}
+                
+                if target_id in ch_config["guilds"]:
+                    self.log(f"ℹ️ 서버 ID({target_id})는 이미 Discord 허용 목록에 있습니다.")
+                    return
+                
+                # 프라이빗 서버용으로 멘션 없이도 대답하도록 requireMention: false 설정
+                ch_config["guilds"][target_id] = {
+                    "requireMention": False
+                }
+                self.log(f"✅ Discord 서버({target_id}) 등록 완료! (멘션 없이 응답)")
+            
+            # 그 외 텔레그램, 슬랙 등은 기존 allowlist 배열 방식 유지
+            else:
+                if "allowlist" not in ch_config:
+                    ch_config["allowlist"] = []
+
+                if target_id in ch_config["allowlist"]:
+                    self.log(f"ℹ️ ID({target_id})는 이미 {channel} 허용 목록에 있습니다.")
+                    return
+                
+                ch_config["allowlist"].append(target_id)
+                self.log(f"✅ 설정 파일에 ID({target_id}) 추가 완료!")
+
+            # 파일 덮어쓰기
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(config_data, f, indent=2)
+
+            # Docker 재시작 적용
+            check = subprocess.run(["docker", "ps", "-q", "-f", "name=openclaw-main"], capture_output=True, text=True)
+            if check.stdout.strip():
+                self.log("🔄 변경사항 적용을 위해 시스템을 재시작합니다... (약 5초)")
+                si = self._make_si()
+                subprocess.run(["docker", "restart", "openclaw-main"], startupinfo=si, capture_output=True)
+                time.sleep(5)
+                
+                proxy_js = "require('net').createServer(c=>{let s=require('net').connect(18789,'127.0.0.1');c.pipe(s).pipe(c);s.on('error',()=>c.destroy());c.on('error',()=>s.destroy());}).listen(18790,'0.0.0.0')"
+                subprocess.run(["docker", "exec", "-d", "openclaw-main", "node", "-e", proxy_js], startupinfo=si, capture_output=True)
+                self.log("✅ 적용 완료! 봇이 이제 해당 공간에서 응답합니다.")
+                
+            self.allowlist_id_entry.delete(0, "end")
+
+        except Exception as e:
+            self.log(f"❌ Allowlist 추가 중 오류 발생: {e}")
 
     def _on_mode_change(self, value):
         if "로컬" in value:
@@ -665,7 +755,6 @@ class OpenClawLauncher(ctk.CTk):
             config_dir  = os.path.expanduser("~/.openclaw_data")
             config_path = os.path.join(config_dir, "config.json")
 
-            # 🟢 [수정 1] 변수 선언 맨 위로 이동 (UnboundLocalError 방지)
             tg_token       = self.tg_entry.get().strip()
             dc_token       = self.dc_entry.get().strip()
             slack_bot      = self.slack_bot_entry.get().strip()
@@ -723,7 +812,6 @@ class OpenClawLauncher(ctk.CTk):
                 target_model_id   = raw_model
                 base_url          = provider_info["base_url"]
                 
-                # 🟢 [수정] 분리된 변수를 정확히 가져옵니다.
                 provider_id       = provider_info["provider_id"]
                 api_type          = provider_info["api_type"]
                 ctx_window        = 128000
@@ -740,7 +828,6 @@ class OpenClawLauncher(ctk.CTk):
                 ollama_env = os.environ.copy()
                 ollama_env["OLLAMA_HOST"] = "0.0.0.0"
                 subprocess.Popen(["ollama", "serve"], env=ollama_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, startupinfo=si)
-                # 🟢 [수정 핵심] 서버가 부팅될 시간을 5초 벌어줍니다. (충돌 방지)
                 self.log("⏳ Ollama 엔진 부팅 대기 중... (5초)")
                 time.sleep(5)
                 self.pulling_model = True
@@ -758,9 +845,23 @@ class OpenClawLauncher(ctk.CTk):
             self.log(">>> [1] 이전 Docker 컨테이너 정리 중...")
             subprocess.run(["docker", "rm", "-f", "openclaw-main"], capture_output=True, startupinfo=si)
 
-            self.log(">>> [2] 설정 파일 갱신 중...")
+            self.log(">>> [2] 설정 파일 갱신 및 백업 중...")
             os.makedirs(config_dir, exist_ok=True)
+            
+            # 🟢 [핵심 변경 2] 기존 파일에서 Discord의 guilds 구조도 안전하게 백업
+            existing_allowlists = {}
+            existing_guilds = {}
             if os.path.exists(config_path):
+                try:
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        old_data = json.load(f)
+                        for ch_name, ch_data in old_data.get("channels", {}).items():
+                            if "allowlist" in ch_data:
+                                existing_allowlists[ch_name] = ch_data["allowlist"]
+                            if ch_name == "discord" and "guilds" in ch_data:
+                                existing_guilds = ch_data["guilds"]
+                except Exception:
+                    pass
                 os.remove(config_path)
 
             self.set_cat_progress(0.5)
@@ -768,7 +869,6 @@ class OpenClawLauncher(ctk.CTk):
             # ── config.json 생성 ─────────────────────────────
             self.log(">>> [3] OpenClaw 설정 파일 생성 중...")
 
-            # 🟢 [수정 2] 토큰이 있는 채널만 JSON에 방을 만듭니다. (Unsupported schema 에러 방지)
             channels_config = {
                 "whatsapp": { "enabled": True, "dmPolicy": "pairing", "groupPolicy": "allowlist", "debounceMs": 0, "mediaMaxMb": 50 }
             }
@@ -789,6 +889,14 @@ class OpenClawLauncher(ctk.CTk):
                 channels_config["slack"] = { "enabled": True, "dmPolicy": "pairing", "groupPolicy": "allowlist" }
                 self.log("✅ Slack 설정 준비 완료")
 
+            # 🟢 [핵심 변경 3] 백업해둔 Discord guilds 정보 원상복구
+            for ch_name in channels_config:
+                if ch_name in existing_allowlists:
+                    channels_config[ch_name]["allowlist"] = existing_allowlists[ch_name]
+            
+            if "discord" in channels_config and existing_guilds:
+                channels_config["discord"]["guilds"] = existing_guilds
+
             config_data = {
                 "models": { "providers": {} },
                 "agents": { "defaults": { "model": { "primary": target_model_full } } },
@@ -807,7 +915,7 @@ class OpenClawLauncher(ctk.CTk):
             else:
                 config_data["models"]["providers"][provider_id] = {
                     "baseUrl": base_url, 
-                    "api": api_type,  # 🟢 [수정] 정확한 통신 규격(api_type)을 적어줍니다.
+                    "api": api_type,
                     "apiKey": api_key,
                     "models": [ { "id": target_model_id, "name": target_model_id, "contextWindow": ctx_window } ]
                 }
@@ -886,7 +994,6 @@ class OpenClawLauncher(ctk.CTk):
                     self.log(">>> [6] 채널 토큰 주입 중...")
                     time.sleep(3)  # 게이트웨이 안정화 대기
 
-                # 🟢 [수정 3] 옵션 다 빼고 순정 명령어로 토큰만 깔끔하게 주입, 콤마 오타 제거
                 if tg_token:
                     self.log("📡 Telegram 토큰 등록 중...")
                     res = subprocess.run(["docker", "exec", "openclaw-main", "openclaw", "channels", "add", "--channel", "telegram", "--token", tg_token], capture_output=True, text=True, startupinfo=si)
@@ -905,13 +1012,11 @@ class OpenClawLauncher(ctk.CTk):
                     out = (res.stdout + res.stderr).strip()
                     self.log(f"[Slack] {out or '완료'}")
 
-                # 🟢 [핵심 추가] 토큰을 DB에 넣었으니, 완벽하게 인식하도록 도커를 재시작합니다!
                 if tg_token or dc_token or (slack_bot and slack_app):
                     self.log("🔄 토큰 적용을 위해 시스템을 재시작합니다... (약 6초 소요)")
                     subprocess.run(["docker", "restart", "openclaw-main"], startupinfo=si, capture_output=True)
                     time.sleep(6) # 재부팅이 완료될 때까지 대기
                     
-                    # 재부팅하면 끊어지는 연결 포트(18790)를 다시 이어줍니다.
                     proxy_js = "require('net').createServer(c=>{let s=require('net').connect(18789,'127.0.0.1');c.pipe(s).pipe(c);s.on('error',()=>c.destroy());c.on('error',()=>s.destroy());}).listen(18790,'0.0.0.0')"
                     subprocess.run(["docker", "exec", "-d", "openclaw-main", "node", "-e", proxy_js], startupinfo=si, capture_output=True)
                     self.log("✅ 시스템 재부팅 및 100% 로드 완료!")
