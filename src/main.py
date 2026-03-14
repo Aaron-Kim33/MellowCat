@@ -121,7 +121,7 @@ OLLAMA_MODELS = [
     ("llama3.2",           "Llama 3.2 3B",           8,  "가장 빠름",   32000),
     ("qwen2.5-coder:7b",   "Qwen 2.5 Coder 7B",      8,  "코딩 특화",   32000),
     ("llama3.1",           "Llama 3.1 8B",           16,  "표준형",     128000),
-    ("gemma2",             "Gemma 2 9B",             16,  "고성능",      8192),
+    ("gemma2",             "Gemma 2 9B",             16,  "고성능",      32000),
     ("deepseek-coder-v2",  "DeepSeek Coder V2 Lite", 32,  "전문가용",   128000),
 ]
 
