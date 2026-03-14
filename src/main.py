@@ -706,7 +706,6 @@ class OpenClawLauncher(ctk.CTk):
                             self.start_btn.configure(state="normal")
                             return
                     elif self.is_mac:
-                        elif self.is_mac:
                         # 1. brew가 있는지 검사
                         if not shutil.which("brew"):
                             self.log("⚠️ Homebrew가 없습니다. 터미널을 열어 자동 설치를 진행합니다.")
