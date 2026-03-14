@@ -1,8 +1,10 @@
-name: MellowCat Auto Build
+name: MellowCat Auto Build & Release
 
 on:
   push:
-    branches: [ "main" ]
+    # v1.0, v2.1.3 같은 '태그'를 푸시하면 배포가 시작됩니다.
+    tags:
+      - 'v*' 
 
 jobs:
   build:
@@ -10,6 +12,9 @@ jobs:
       matrix:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    # 권한 설정 (Release 생성을 위해 필수)
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -19,31 +24,31 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 1. 수정됨: requirements.txt를 통째로 읽어서 Pillow까지 완벽 설치!
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
 
-      # 2. 수정됨: --add-data "assets;assets" 추가 (이미지 폴더 포장)
+      # 윈도우 빌드
       - name: Build (Windows)
         if: matrix.os == 'windows-latest'
         run: |
           pyinstaller --noconfirm --onefile --windowed --uac-admin --icon="assets/icon.ico" --add-data "assets;assets" --name "MellowCat_Win" src/main.py
 
-      # 3. 수정됨: 에러를 일으키던 icon.icns 삭제 및 --add-data "assets:assets" 추가 (맥은 : 를 씁니다)
-      # (주의: 맥북 빌드 오류를 방지하기 위해 --onefile 옵션도 안전하게 뺐습니다)
+      # 맥 빌드 (압축까지 진행)
       - name: Build (macOS)
         if: matrix.os == 'macos-latest'
         run: |
           pyinstaller --noconfirm --windowed --add-data "assets:assets" --name "MellowCat_Mac" src/main.py
+          cd dist && zip -r MellowCat_Mac.zip MellowCat_Mac.app
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+      # GitHub Release에 파일 업로드 (여기서 다운로드 링크가 생성됨)
+      - name: Release Assets
+        uses: softprops/action-gh-release@v2
         with:
-          name: MellowCat-${{ matrix.os }}
-          path: |
-            dist/*.exe
-            dist/*.app
-            dist/*/
+          files: |
+            dist/MellowCat_Win.exe
+            dist/MellowCat_Mac.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
