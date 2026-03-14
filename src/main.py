@@ -641,18 +641,19 @@ class OpenClawLauncher(ctk.CTk):
         self.after(10000, self.update_status_loop)
 
     def _check_services(self):
+        si = self._make_si()
         try:
-            d = subprocess.run(["docker", "ps", "--filter", "name=openclaw-main", "-q"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+            d = subprocess.run(["docker", "ps", "--filter", "name=openclaw-main", "-q"], capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=si)
             on = bool(d.stdout.strip()) and d.returncode == 0
             self.docker_status.configure(text="● 실행 중" if on else "○ 중지됨", text_color="#22CC22" if on else "#CC2222")
         except Exception: self.docker_status.configure(text="○ 중지됨", text_color="#CC2222")
 
         try:
             if self.is_mac or platform.system() == "Linux":
-                o = subprocess.run(["pgrep", "-x", "ollama"], capture_output=True, text=True)
+                o = subprocess.run(["pgrep", "-x", "ollama"], capture_output=True, text=True, startupinfo=si)
                 on = (o.returncode == 0)
             else:
-                o = subprocess.run(["tasklist", "/FI", "IMAGENAME eq ollama.exe", "/NH"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+                o = subprocess.run(["tasklist", "/FI", "IMAGENAME eq ollama.exe", "/NH"], capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=si)
                 on = "ollama.exe" in o.stdout.lower()
             self.ollama_status.configure(text="● 실행 중" if on else "○ 중지됨", text_color="#22CC22" if on else "#CC2222")
         except Exception: self.ollama_status.configure(text="○ 중지됨", text_color="#CC2222")
