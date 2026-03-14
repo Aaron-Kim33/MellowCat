@@ -135,6 +135,18 @@ class OpenClawLauncher(ctk.CTk):
         self.is_mac     = platform.system() == "Darwin"
         self.is_windows = platform.system() == "Windows"
 
+        if self.is_mac:
+            # Mac에서 주로 사용하는 패키지 관리자 경로들을 모아둡니다.
+            extra_paths = ["/opt/homebrew/bin", "/usr/local/bin"]
+            current_path = os.environ.get("PATH", "")
+            
+            # 현재 PATH에 위 경로들이 없다면 맨 앞에 강제로 이어 붙여줍니다.
+            for p in extra_paths:
+                if os.path.exists(p) and p not in current_path:
+                    current_path = f"{p}:{current_path}"
+            
+            os.environ["PATH"] = current_path
+        
         if self.is_windows and getattr(sys, "frozen", False) and not is_admin():
             self.withdraw()
             messagebox.showerror("권한 필요", "이 애플리케이션을 실행하려면 관리자 권한이 필요합니다.")
@@ -642,21 +654,32 @@ class OpenClawLauncher(ctk.CTk):
 
     def _check_services(self):
         si = self._make_si()
+        # 1. 무거운 확인 작업은 백그라운드 스레드에서 조용히 처리합니다.
+        docker_on = False
         try:
             d = subprocess.run(["docker", "ps", "--filter", "name=openclaw-main", "-q"], capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=si)
-            on = bool(d.stdout.strip()) and d.returncode == 0
-            self.docker_status.configure(text="● 실행 중" if on else "○ 중지됨", text_color="#22CC22" if on else "#CC2222")
-        except Exception: self.docker_status.configure(text="○ 중지됨", text_color="#CC2222")
+            docker_on = bool(d.stdout.strip()) and d.returncode == 0
+        except Exception: 
+            pass
 
+        ollama_on = False
         try:
             if self.is_mac or platform.system() == "Linux":
                 o = subprocess.run(["pgrep", "-x", "ollama"], capture_output=True, text=True, startupinfo=si)
-                on = (o.returncode == 0)
+                ollama_on = (o.returncode == 0)
             else:
                 o = subprocess.run(["tasklist", "/FI", "IMAGENAME eq ollama.exe", "/NH"], capture_output=True, text=True, encoding="utf-8", errors="replace", startupinfo=si)
-                on = "ollama.exe" in o.stdout.lower()
-            self.ollama_status.configure(text="● 실행 중" if on else "○ 중지됨", text_color="#22CC22" if on else "#CC2222")
-        except Exception: self.ollama_status.configure(text="○ 중지됨", text_color="#CC2222")
+                ollama_on = "ollama.exe" in o.stdout.lower()
+        except Exception: 
+            pass
+
+        # 2. UI 화면을 바꾸는 작업은 메인 스레드에게 안전하게 넘겨줍니다!
+        def update_ui():
+            self.docker_status.configure(text="● 실행 중" if docker_on else "○ 중지됨", text_color="#22CC22" if docker_on else "#CC2222")
+            self.ollama_status.configure(text="● 실행 중" if ollama_on else "○ 중지됨", text_color="#22CC22" if ollama_on else "#CC2222")
+
+        # 화면 멈춤 방지 핵심 코드
+        self.after(0, update_ui)
 
     def start_docker_engine(self):
         self.log("⏳ Docker 엔진 상태 확인 중...")
