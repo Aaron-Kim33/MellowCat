@@ -706,13 +706,26 @@ class OpenClawLauncher(ctk.CTk):
                             self.start_btn.configure(state="normal")
                             return
                     elif self.is_mac:
+                        elif self.is_mac:
+                        # 1. brew가 있는지 검사
+                        if not shutil.which("brew"):
+                            self.log("⚠️ Homebrew가 없습니다. 터미널을 열어 자동 설치를 진행합니다.")
+                            self.log("👉 새로 뜬 터미널 창에서 [엔터]를 누르고, 맥북 비밀번호를 입력해주세요!")
+                            
+                            # AppleScript를 사용해 새 터미널 창을 열고 brew 설치 명령어 자동 실행
+                            brew_cmd = '/bin/bash -c \\"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\\"'
+                            apple_script = f'tell application "Terminal" to do script "{brew_cmd}"'
+                            subprocess.run(["osascript", "-e", apple_script])
+                            
+                            self.log("⏳ 터미널에서 설치가 완료되면, 런처를 껐다 켜거나 다시 시작 버튼을 눌러주세요.")
+                            self.start_btn.configure(state="normal")
+                            return
+
+                        # 2. brew가 있다면 ollama 설치 진행
                         if self.run_with_live_logs(["brew", "install", "ollama"]) != 0:
                             self.log("❌ Ollama 설치 실패. https://ollama.com 에서 수동 설치 후 재시도하세요.")
                             self.start_btn.configure(state="normal")
                             return
-                    self.log("✅ Ollama 설치 완료!")
-                else: self.log("✅ Ollama 점검 완료.")
-            else: self.log("☁️ 클라우드 API 모드: Ollama 불필요, 건너뜁니다.")
 
             self.set_cat_progress(0.15)
 
